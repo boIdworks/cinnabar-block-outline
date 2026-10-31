@@ -5,7 +5,7 @@ use wasm_encoder::{ComponentNameSection, ComponentSection, CustomSection};
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
-        return Err("usage: cinnabar-mod-template-pack CORE.wasm COMPONENT.wasm".into());
+        return Err("usage: block-outline-pack CORE.wasm COMPONENT.wasm".into());
     }
 
     let core = std::fs::read(&args[0])?;
@@ -15,17 +15,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         .encode()?;
 
     let mut name = ComponentNameSection::new();
-    name.component("Cinnabar Mod Template");
+    name.component("Block Outline");
     name.append_to_component(&mut component);
     append_section(
         &mut component,
         "description",
-        b"Starter mod that publishes a HUD label and reacts to the demo key.",
+        b"Outlines the block you are looking at. Press F8 to change its colour, opacity and thickness.",
     );
     append_section(
         &mut component,
         "cinnabar:grants",
         include_bytes!("../grants.json"),
+    );
+    // The F8 menu, loaded by the host without spending guest fuel.
+    append_section(
+        &mut component,
+        "cinnabar:extension/panel-bundle@1",
+        block_outline::panel::bundle().as_bytes(),
     );
     append_section(
         &mut component,

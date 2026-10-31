@@ -1,5 +1,5 @@
 [package]
-name = "cinnabar-mod-template-pack"
+name = "block-outline-pack"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,6 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+block-outline = { path = ".." }
 wit-component = "=0.247.0"
 wasmparser = "=0.247.0"
 wasm-encoder = "=0.247.0"

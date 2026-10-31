@@ -1,6 +1,6 @@
 [workspace]
-members = ["mods/template", "mods/template/pack"]
-default-members = ["mods/template"]
+members = ["mods/block-outline", "mods/block-outline/pack"]
+default-members = ["mods/block-outline"]
 resolver = "3"
 
 [workspace.package]

@@ -1,0 +1,7 @@
+{
+  "terrain": true,
+  "world_draw": true,
+  "render": true,
+  "settings": true,
+  "controls": true
+}
