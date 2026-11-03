@@ -14,6 +14,139 @@ pub struct Settings {
     pub fill: u8,
     /// Maximum targeting distance from the eye, in blocks.
     pub reach: f32,
+    /// Physical key that opens and closes the F8 menu.
+    pub menu_key: KeyName,
+    /// sRGB colour of the face fill; `None` follows the line colour (rainbow included).
+    pub fill_rgb: Option<[u8; 3]>,
+    /// Gently fades the outline in and out.
+    pub pulse: bool,
+    /// How strongly to cancel Cinnabar's light face highlight (its Outline Selection off mode)
+    /// on the block it selects, in percent (0 = off, steps of `HIGHLIGHT_CANCEL_STEP`): those
+    /// faces are darkened first by up to the factor the highlight brightens them.
+    pub highlight_cancel: u8,
+    /// How mob hitboxes are drawn, set on the menu's Mob hitbox page. The fields above with
+    /// the same names are the block outline's.
+    pub mob: Style,
+    /// Cinnabar's local fullbright lighting: everything lit as in daylight, on this screen only.
+    pub fullbright: bool,
+    /// A key that switches fullbright on and off in game, if one is set.
+    pub fullbright_key: Option<KeyName>,
+    /// Outline every nearby mob, not only the one aimed at.
+    pub show_all_mobs: bool,
+    /// Line colour of the mob aimed at while every nearby mob is outlined.
+    pub aim_rgb: [u8; 3],
+    /// Saved colours, filled by the menu's Save button.
+    pub favourites: [Option<[u8; 4]>; FAVOURITES],
+    /// The slot the next Save writes, oldest first.
+    pub next_favourite: u8,
+}
+
+/// The aimed mob's default colour: a clear red.
+pub const DEFAULT_AIM: [u8; 3] = [255, 60, 60];
+
+/// The look of one kind of outline: blocks use the top-level settings, mobs `Settings::mob`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    pub rgba: [u8; 4],
+    pub rainbow: bool,
+    pub width: f32,
+    pub fill: u8,
+    pub fill_rgb: Option<[u8; 3]>,
+    pub pulse: bool,
+}
+
+impl Style {
+    pub const DEFAULT: Self = Self {
+        rgba: [255, 255, 255, 255],
+        rainbow: false,
+        width: 3.0,
+        fill: 0,
+        fill_rgb: None,
+        pulse: false,
+    };
+}
+
+/// How much Cinnabar's selection highlight brightens a face: it draws a fixed grey of 0.65
+/// (`HIGHLIGHT_COLOR`) with a `Dst * Src + Src * Dst` blend, which multiplies by 2 × 0.65.
+pub const GAME_HIGHLIGHT_GAIN: f32 = 1.3;
+
+/// Steps of the menu's highlight fix - / + buttons, in percent.
+pub const HIGHLIGHT_CANCEL_STEP: u8 = 5;
+/// The highlight fix strength that matched an untouched block best in game.
+pub const DEFAULT_HIGHLIGHT_CANCEL: u8 = 50;
+
+/// Opacity of a black layer that undoes `percent` of the game highlight's gain: at 100,
+/// `(1 - a) × 1.3 = 1`.
+pub fn highlight_cancel_alpha(percent: u8) -> f32 {
+    let gain = 1.0 + (GAME_HIGHLIGHT_GAIN - 1.0) * f32::from(percent.min(100)) / 100.0;
+    1.0 - 1.0 / gain
+}
+
+/// The highlight fix strength one step stronger (`up`) or weaker, within 0–100 and on a step.
+pub fn step_highlight_cancel(percent: u8, up: bool) -> u8 {
+    let step = HIGHLIGHT_CANCEL_STEP;
+    let snapped = percent.min(100) / step * step;
+    if up {
+        (snapped + step).min(100)
+    } else if snapped < percent {
+        snapped
+    } else {
+        snapped.saturating_sub(step)
+    }
+}
+
+/// Number of favourite colour slots.
+pub const FAVOURITES: usize = 4;
+
+/// A physical key name as Cinnabar's controls report it (`F8`, `KeyE`, `Digit1`), stored
+/// inline so [`Settings`] stays `Copy`. At most 32 ASCII letters and digits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct KeyName {
+    bytes: [u8; 32],
+    len: u8,
+}
+
+impl KeyName {
+    pub const DEFAULT: Self = Self::literal("F8");
+
+    const fn literal(name: &str) -> Self {
+        let mut bytes = [0; 32];
+        let mut index = 0;
+        while index < name.len() {
+            bytes[index] = name.as_bytes()[index];
+            index += 1;
+        }
+        Self {
+            bytes,
+            len: name.len() as u8,
+        }
+    }
+
+    /// A valid key name: 1 to 32 ASCII letters and digits.
+    pub fn new(name: &str) -> Option<Self> {
+        let valid =
+            (1..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric());
+        valid.then(|| Self::literal(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("F8")
+    }
+
+    /// A short label: `KeyE` shows as `E`, `Digit1` as `1`, others as named.
+    pub fn display(&self) -> &str {
+        let name = self.as_str();
+        name.strip_prefix("Key")
+            .or_else(|| name.strip_prefix("Digit"))
+            .filter(|rest| rest.len() == 1)
+            .unwrap_or(name)
+    }
+}
+
+impl std::fmt::Debug for KeyName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 pub const MIN_WIDTH: f32 = 1.0;
@@ -33,6 +166,17 @@ impl Default for Settings {
             width: 3.0,
             fill: 0,
             reach: PLAYER_REACH,
+            menu_key: KeyName::DEFAULT,
+            fill_rgb: None,
+            pulse: false,
+            highlight_cancel: DEFAULT_HIGHLIGHT_CANCEL,
+            mob: Style::DEFAULT,
+            show_all_mobs: true,
+            aim_rgb: DEFAULT_AIM,
+            fullbright: false,
+            fullbright_key: None,
+            favourites: [None; FAVOURITES],
+            next_favourite: 0,
         }
     }
 }
@@ -74,6 +218,63 @@ impl Settings {
         if let Some(fill) = number_field(json, "fill") {
             settings.fill = fill.round().clamp(0.0, 100.0) as u8;
         }
+        match string_field(json, "fill_color") {
+            Some(text) if text.trim().eq_ignore_ascii_case("line") => settings.fill_rgb = None,
+            Some(text) => {
+                if let Some([r, g, b, _]) = parse_color(text) {
+                    settings.fill_rgb = Some([r, g, b]);
+                }
+            }
+            None => {}
+        }
+        // Older files had an on/off switch; full strength turned out too dark, so on means half.
+        if let Some(hide) = bool_field(json, "hide_game_highlight") {
+            settings.highlight_cancel = if hide { 50 } else { 0 };
+        }
+        if let Some(percent) = number_field(json, "highlight_cancel") {
+            settings.highlight_cancel = percent.round().clamp(0.0, 100.0) as u8;
+        }
+        if let Some(pulse) = bool_field(json, "pulse") {
+            settings.pulse = pulse;
+        }
+        // Mobs looked like blocks before they had their own page: start from the block look.
+        settings.mob = settings.style();
+        if let Some(rgba) = string_field(json, "mob_color").and_then(parse_color) {
+            settings.mob.rgba = rgba;
+        }
+        if let Some(rainbow) = bool_field(json, "mob_rainbow") {
+            settings.mob.rainbow = rainbow;
+        }
+        if let Some(width) = number_field(json, "mob_width") {
+            settings.mob.width = width.clamp(MIN_WIDTH, MAX_WIDTH);
+        }
+        // Mob hitboxes never pulse and have no fill.
+        settings.mob.pulse = false;
+        settings.mob.fill_rgb = None;
+        settings.mob.fill = 0;
+        if let Some(fullbright) = bool_field(json, "fullbright") {
+            settings.fullbright = fullbright;
+        }
+        if let Some(key) = string_field(json, "fullbright_key") {
+            settings.fullbright_key = KeyName::new(key);
+        }
+        if let Some(all) = bool_field(json, "show_all_mobs") {
+            settings.show_all_mobs = all;
+        }
+        if let Some([r, g, b, _]) = string_field(json, "aim_color").and_then(parse_color) {
+            settings.aim_rgb = [r, g, b];
+        }
+        if let Some(list) = string_field(json, "favourites") {
+            for (slot, code) in settings.favourites.iter_mut().zip(list.split(',')) {
+                *slot = parse_color(code);
+            }
+        }
+        if let Some(next) = number_field(json, "next_favourite") {
+            settings.next_favourite = (next.max(0.0) as usize % FAVOURITES) as u8;
+        }
+        if let Some(key) = string_field(json, "menu_key").and_then(KeyName::new) {
+            settings.menu_key = key;
+        }
         if let Some(reach) = number_field(json, "reach") {
             settings.reach = reach.clamp(MIN_REACH, MAX_REACH);
         }
@@ -81,18 +282,150 @@ impl Settings {
     }
 
     pub fn to_json(&self) -> String {
-        let [r, g, b, a] = self.rgba;
-        format!(
-            "{{
-  \"color\": \"#{r:02X}{g:02X}{b:02X}{a:02X}\",
-  \"rainbow\": {},
-  \"width\": {},
-  \"fill\": {},
-  \"reach\": {}
-}}
+        let favourites: Vec<String> = self
+            .favourites
+            .iter()
+            .map(|slot| slot.map(hex_code).unwrap_or_default())
+            .collect();
+        let fill_colour = self
+            .fill_rgb
+            .map_or_else(|| "line".to_owned(), |[r, g, b]| hex_code([r, g, b, 255]));
+        let mut out = String::with_capacity(320);
+        out.push_str(
+            "{
 ",
-            self.rainbow, self.width, self.fill, self.reach
-        )
+        );
+        let mut field = |name: &str, value: String| {
+            out.push_str("  \"");
+            out.push_str(name);
+            out.push_str("\": ");
+            out.push_str(&value);
+            out.push_str(
+                ",
+",
+            );
+        };
+        field("color", format!("\"{}\"", hex_code_full(self.rgba)));
+        field("rainbow", self.rainbow.to_string());
+        field("width", self.width.to_string());
+        field("fill", self.fill.to_string());
+        field("fill_color", format!("\"{fill_colour}\""));
+        field("pulse", self.pulse.to_string());
+        field("mob_color", format!("\"{}\"", hex_code_full(self.mob.rgba)));
+        field("mob_rainbow", self.mob.rainbow.to_string());
+        field("mob_width", self.mob.width.to_string());
+        field("show_all_mobs", self.show_all_mobs.to_string());
+        field("fullbright", self.fullbright.to_string());
+        field(
+            "fullbright_key",
+            format!(
+                "\"{}\"",
+                self.fullbright_key.as_ref().map_or("", KeyName::as_str)
+            ),
+        );
+        let [r, g, b] = self.aim_rgb;
+        field("aim_color", format!("\"{}\"", hex_code([r, g, b, 255])));
+        field("highlight_cancel", self.highlight_cancel.to_string());
+        field("favourites", format!("\"{}\"", favourites.join(",")));
+        field("next_favourite", self.next_favourite.to_string());
+        field("reach", self.reach.to_string());
+        field("menu_key", format!("\"{}\"", self.menu_key.as_str()));
+        out.truncate(out.len() - 2);
+        out.push_str(
+            "
+}
+",
+        );
+        out
+    }
+
+    /// The block outline back to the defaults, keeping the mob look, menu key and favourites.
+    pub fn reset(&mut self) {
+        *self = Self {
+            mob: self.mob,
+            show_all_mobs: self.show_all_mobs,
+            aim_rgb: self.aim_rgb,
+            fullbright: self.fullbright,
+            fullbright_key: self.fullbright_key,
+            menu_key: self.menu_key,
+            highlight_cancel: self.highlight_cancel,
+            favourites: self.favourites,
+            next_favourite: self.next_favourite,
+            ..Self::default()
+        };
+    }
+
+    /// The block outline's look.
+    pub fn style(&self) -> Style {
+        Style {
+            rgba: self.rgba,
+            rainbow: self.rainbow,
+            width: self.width,
+            fill: self.fill,
+            fill_rgb: self.fill_rgb,
+            pulse: self.pulse,
+        }
+    }
+
+    /// These settings with `style` as the outline look.
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.rgba = style.rgba;
+        self.rainbow = style.rainbow;
+        self.width = style.width;
+        self.fill = style.fill;
+        self.fill_rgb = style.fill_rgb;
+        self.pulse = style.pulse;
+        self
+    }
+
+    /// These settings as mob hitboxes are drawn and edited: the mob look in the outline fields.
+    pub fn for_mobs(&self) -> Self {
+        self.with_style(self.mob)
+    }
+
+    /// How the mob aimed at is drawn while every nearby mob is outlined: the mob look with the
+    /// aimed colour for the lines (and a fill that follows them).
+    pub fn aimed(&self) -> Self {
+        let mut aimed = self.for_mobs();
+        let [r, g, b] = self.aim_rgb;
+        aimed.rgba = [r, g, b, aimed.rgba[3]];
+        aimed.rainbow = false;
+        aimed
+    }
+
+    /// Takes back settings edited through [`Settings::for_mobs`]: their outline look becomes
+    /// the mob look; everything else (menu key, favourites, …) is kept as edited.
+    pub fn store_mob(&mut self, edited: &Settings) {
+        let block = self.style();
+        *self = edited.with_style(block);
+        self.mob = edited.style();
+    }
+
+    /// Saves `rgba` into the next favourite slot, oldest first.
+    pub fn save_favourite(&mut self, rgba: [u8; 4]) {
+        let slot = usize::from(self.next_favourite) % FAVOURITES;
+        self.favourites[slot] = Some(rgba);
+        self.next_favourite = ((slot + 1) % FAVOURITES) as u8;
+    }
+
+    /// Opacity multiplier for the pulse effect: a 1.5-second breath between 45% and 100%.
+    pub fn pulse_factor(&self, seconds: f32) -> f32 {
+        if !self.pulse {
+            return 1.0;
+        }
+        let wave = (seconds * std::f32::consts::TAU / 1.5).sin() * 0.5 + 0.5;
+        0.45 + 0.55 * wave
+    }
+
+    /// sRGB 0–1 colour of the fill: its own colour, or the line's.
+    pub fn fill_srgb(&self, seconds: f32) -> [f32; 3] {
+        match self.fill_rgb {
+            Some(rgb) => rgb.map(|c| f32::from(c) / 255.0),
+            None => {
+                let [r, g, b, _] = self.srgb(seconds);
+                [r, g, b]
+            }
+        }
     }
 
     /// sRGB 0–1 colour shown at `seconds`: the rainbow hue or the fixed colour, with opacity.
@@ -131,6 +464,78 @@ pub fn parse_color(text: &str) -> Option<[u8; 4]> {
         8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
         _ => None,
     }
+}
+
+/// Always `#RRGGBBAA`, for the settings file.
+pub fn hex_code_full(rgba: [u8; 4]) -> String {
+    hex_digits(&rgba)
+}
+
+/// `#RRGGBB`, or `#RRGGBBAA` when the colour is not fully opaque.
+pub fn hex_code(rgba: [u8; 4]) -> String {
+    hex_digits(if rgba[3] == 255 {
+        &rgba[..3]
+    } else {
+        &rgba[..]
+    })
+}
+
+/// `#` followed by two upper-case hex digits per byte, without float or `fmt` machinery.
+fn hex_digits(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(1 + 2 * bytes.len());
+    out.push('#');
+    for byte in bytes {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 15)]));
+    }
+    out
+}
+
+/// Hue (0–1), saturation (0–1) and value (0–1) of an sRGB colour.
+pub fn rgb_to_hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
+    let [r, g, b] = [r, g, b].map(|c| f32::from(c) / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let hue = if delta <= 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / delta).rem_euclid(6.0) / 6.0
+    } else if max == g {
+        ((b - r) / delta + 2.0) / 6.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0
+    };
+    let saturation = if max <= 0.0 { 0.0 } else { delta / max };
+    [hue, saturation, max]
+}
+
+/// sRGB bytes for a hue, saturation and value, each 0–1.
+pub fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [u8; 3] {
+    let [r, g, b] = hue_to_rgb(hue.rem_euclid(1.0));
+    let (saturation, value) = (saturation.clamp(0.0, 1.0), value.clamp(0.0, 1.0));
+    [r, g, b].map(|c| ((1.0 - saturation + saturation * c) * value * 255.0).round() as u8)
+}
+
+/// Colour picked at a point of the wheel: `x`, `y` from 0 to 1 across its square, `y` down.
+/// Angle is hue with red to the right, distance from the centre is saturation, and `value`
+/// keeps the current brightness.
+pub fn wheel_colour(x: f32, y: f32, value: f32) -> [u8; 3] {
+    let (dx, dy) = (x - 0.5, 0.5 - y);
+    let saturation = (2.0 * (dx * dx + dy * dy).sqrt()).min(1.0);
+    let hue = dy.atan2(dx) / std::f32::consts::TAU;
+    hsv_to_rgb(hue, saturation, value)
+}
+
+/// Where a colour sits on the wheel, as the `x`, `y` that [`wheel_colour`] reads.
+pub fn wheel_position(rgb: [u8; 3]) -> [f32; 2] {
+    let [hue, saturation, _] = rgb_to_hsv(rgb);
+    let angle = hue * std::f32::consts::TAU;
+    [
+        0.5 + saturation * angle.cos() / 2.0,
+        0.5 - saturation * angle.sin() / 2.0,
+    ]
 }
 
 pub fn srgb_to_linear(c: f32) -> f32 {
@@ -212,11 +617,206 @@ pub enum Cell {
 }
 
 /// The targeted block and the world-space bounds of its selection shape.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub block: [i32; 3],
     pub min: [f64; 3],
     pub max: [f64; 3],
+    /// Distance along the look ray to where it enters the shape.
+    pub distance: f64,
+    /// Whether this is Cinnabar's own selection, which it outlines or highlights itself: a block
+    /// hit by the look ray. The bridging support block and actors are not.
+    pub direct: bool,
+    /// The shape's boxes in world space (just the bounds when there are too many).
+    pub boxes: Boxes,
+}
+
+/// Shapes with more boxes than this are outlined by their bounds: merging their outlines would
+/// cost too much of a frame's fuel.
+pub const MAX_SHAPE_BOXES: usize = 4;
+
+/// A block's selection boxes in world space, `[min x, min y, min z, max x, max y, max z]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Boxes {
+    boxes: [[f64; 6]; MAX_SHAPE_BOXES],
+    len: u8,
+}
+
+impl Boxes {
+    pub fn single(min: [f64; 3], max: [f64; 3]) -> Self {
+        let mut boxes = [[0.0; 6]; MAX_SHAPE_BOXES];
+        boxes[0] = [min[0], min[1], min[2], max[0], max[1], max[2]];
+        Self { boxes, len: 1 }
+    }
+
+    /// The boxes, or just `bounds` when there are more than `MAX_SHAPE_BOXES`.
+    pub fn new(list: &[[f64; 6]], min: [f64; 3], max: [f64; 3]) -> Self {
+        if list.is_empty() || list.len() > MAX_SHAPE_BOXES {
+            return Self::single(min, max);
+        }
+        let mut boxes = [[0.0; 6]; MAX_SHAPE_BOXES];
+        boxes[..list.len()].copy_from_slice(list);
+        Self {
+            boxes,
+            len: list.len() as u8,
+        }
+    }
+
+    pub fn as_slice(&self) -> &[[f64; 6]] {
+        &self.boxes[..usize::from(self.len)]
+    }
+
+    /// Every box grown by `by` on all sides.
+    pub fn inflated(&self, by: f64) -> Self {
+        let mut grown = *self;
+        for b in &mut grown.boxes[..usize::from(self.len)] {
+            for axis in 0..3 {
+                b[axis] -= by;
+                b[axis + 3] += by;
+            }
+        }
+        grown
+    }
+}
+
+/// One straight piece of a shape's outline, along `axis` from `start`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Segment {
+    pub start: [f64; 3],
+    pub axis: usize,
+    pub length: f64,
+    /// Which of the four quarters around the line are inside the shape: bit `a + 2 * b`, where
+    /// `a` and `b` are 1 on the high side of the first and second other axis.
+    quarters: u8,
+}
+
+impl Segment {
+    pub fn end(&self) -> [f64; 3] {
+        let mut end = self.start;
+        end[self.axis] += self.length;
+        end
+    }
+
+    /// Whether a face meeting at this line faces `camera`, so the line is on the visible side
+    /// of the shape.
+    pub fn visible(&self, camera: [f64; 3]) -> bool {
+        let [u, v] = Edge {
+            axis: self.axis,
+            sides: [false, false],
+        }
+        .others();
+        let inside = |a: u8, b: u8| self.quarters >> (a + 2 * b) & 1 == 1;
+        let ahead = |axis: usize, high: bool| {
+            let offset = camera[axis] - self.start[axis];
+            if high { offset > 1e-9 } else { offset < -1e-9 }
+        };
+        // A face between two quarters faces away from the inside one.
+        (0..2).any(|b| inside(0, b) != inside(1, b) && ahead(u, inside(0, b)))
+            || (0..2).any(|a| inside(a, 0) != inside(a, 1) && ahead(v, inside(a, 0)))
+    }
+}
+
+/// The outline of the union of `boxes`: every box edge, split where other boxes start or end,
+/// keeping only the pieces that are real corners of the merged shape (not lines across a flat
+/// face or inside it). A single box gives its 12 edges.
+pub fn shape_edges(boxes: &[[f64; 6]]) -> Vec<Segment> {
+    const EPS: f64 = 1e-4;
+    // One box (most blocks, every mob): its own 12 edges, each with the box in one quarter.
+    if let [b] = boxes {
+        return EDGES
+            .iter()
+            .filter(|edge| b[edge.axis + 3] - b[edge.axis] >= 0.01)
+            .map(|edge| {
+                let [u, v] = edge.others();
+                let mut start = [0.0; 3];
+                start[edge.axis] = b[edge.axis];
+                start[u] = if edge.sides[0] { b[u + 3] } else { b[u] };
+                start[v] = if edge.sides[1] { b[v + 3] } else { b[v] };
+                // The box lies on the low side of an edge on its high side, and the other way.
+                let quarter = u8::from(!edge.sides[0]) + 2 * u8::from(!edge.sides[1]);
+                Segment {
+                    start,
+                    axis: edge.axis,
+                    length: b[edge.axis + 3] - b[edge.axis],
+                    quarters: 1 << quarter,
+                }
+            })
+            .collect();
+    }
+    // Reused for every edge rather than allocated for each.
+    let mut cuts: Vec<f64> = Vec::with_capacity(2 * boxes.len() + 2);
+    let inside = |p: [f64; 3]| {
+        boxes
+            .iter()
+            .any(|b| (0..3).all(|axis| b[axis] < p[axis] && p[axis] < b[axis + 3]))
+    };
+    let mut segments: Vec<Segment> = Vec::new();
+    for b in boxes {
+        for edge in EDGES {
+            let axis = edge.axis;
+            let [u, v] = edge.others();
+            let mut start = [0.0; 3];
+            start[u] = if edge.sides[0] { b[u + 3] } else { b[u] };
+            start[v] = if edge.sides[1] { b[v + 3] } else { b[v] };
+            let (lo, hi) = (b[axis], b[axis + 3]);
+            // Where other boxes begin or end along this edge.
+            cuts.clear();
+            cuts.extend([lo, hi]);
+            for other in boxes {
+                for cut in [other[axis], other[axis + 3]] {
+                    if cut > lo + EPS && cut < hi - EPS {
+                        cuts.push(cut);
+                    }
+                }
+            }
+            cuts.sort_unstable_by(f64::total_cmp);
+            cuts.dedup_by(|a, b| (*a - *b).abs() < EPS);
+            for pair in cuts.windows(2) {
+                let (from, to) = (pair[0], pair[1]);
+                if to - from < 0.01 {
+                    continue;
+                }
+                let mut probe = start;
+                probe[axis] = (from + to) / 2.0;
+                let mut quarters = 0u8;
+                for (bit, (du, dv)) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let mut p = probe;
+                    p[u] += du * EPS * 10.0;
+                    p[v] += dv * EPS * 10.0;
+                    if inside(p) {
+                        quarters |= 1 << bit;
+                    }
+                }
+                // A corner of the merged shape: one or three quarters inside, or two diagonal.
+                let real = matches!(quarters.count_ones(), 1 | 3)
+                    || quarters == 0b1001
+                    || quarters == 0b0110;
+                if !real {
+                    continue;
+                }
+                let mut from_point = start;
+                from_point[axis] = from;
+                let segment = Segment {
+                    start: from_point,
+                    axis,
+                    length: to - from,
+                    quarters,
+                };
+                let same = |s: &Segment| {
+                    s.axis == axis
+                        && (0..3).all(|i| (s.start[i] - segment.start[i]).abs() < EPS)
+                        && (s.length - segment.length).abs() < EPS
+                };
+                if !segments.iter().any(same) {
+                    segments.push(segment);
+                }
+            }
+        }
+    }
+    segments
 }
 
 /// Walks blocks along the ray (Amanatides–Woo) and returns the first selection box hit within
@@ -255,11 +855,14 @@ pub fn raycast(
                         [base[0] + b[3], base[1] + b[4], base[2] + b[5]],
                     )
                 };
-                let hit = boxes.iter().any(|b| {
-                    let (min, max) = world(b);
-                    ray_box(origin, dir, min, max).is_some_and(|t| t <= reach)
-                });
-                if hit {
+                let hit = boxes
+                    .iter()
+                    .filter_map(|b| {
+                        let (min, max) = world(b);
+                        ray_box(origin, dir, min, max).filter(|t| *t <= reach)
+                    })
+                    .reduce(f64::min);
+                if let Some(distance) = hit {
                     let mut min = [f64::INFINITY; 3];
                     let mut max = [f64::NEG_INFINITY; 3];
                     for b in &boxes {
@@ -269,7 +872,22 @@ pub fn raycast(
                             max[axis] = max[axis].max(hi[axis]);
                         }
                     }
-                    return Some(Hit { block, min, max });
+                    let world_boxes: Vec<[f64; 6]> = boxes
+                        .iter()
+                        .map(|b| {
+                            let (lo, hi) = world(b);
+                            [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]]
+                        })
+                        .collect();
+                    let boxes = Boxes::new(&world_boxes, min, max);
+                    return Some(Hit {
+                        block,
+                        min,
+                        max,
+                        distance,
+                        direct: true,
+                        boxes,
+                    });
                 }
             }
             Cell::Boxes(_) => {}
@@ -300,11 +918,90 @@ pub fn target(
     reach: f64,
     mut lookup: impl FnMut([i32; 3]) -> Cell,
 ) -> Option<Hit> {
-    let hit = match raycast(origin, dir, reach, &mut lookup) {
+    match target_with_actors(origin, dir, reach, &mut lookup, &[]) {
+        Some(Target::Block(hit)) => Some(hit),
+        _ => None,
+    }
+}
+
+/// What the crosshair picks: a block, or an actor's hitbox standing in front of it.
+#[derive(Debug, PartialEq)]
+pub enum Target {
+    Block(Hit),
+    /// The actor's hitbox union; `block` is unused.
+    Actor(Hit),
+}
+
+/// Padding Cinnabar adds to actor hitboxes when picking (`DEFAULT_ACTOR_PICK_RADIUS`).
+pub const ACTOR_PICK_RADIUS: f64 = 0.1;
+
+/// Cinnabar's crosshair choice between actors and blocks (`melee::target::classify`): the
+/// nearest actor hit within `reach` wins when it is more than `ACTOR_PICK_RADIUS` in front of
+/// the block, and then nothing behind it is outlined, bridging support included. Each actor is
+/// a list of world-space boxes; boxes around the eye (the player's own body) are skipped.
+pub fn target_with_actors(
+    origin: [f64; 3],
+    dir: [f64; 3],
+    reach: f64,
+    mut lookup: impl FnMut([i32; 3]) -> Cell,
+    actors: &[Vec<[f64; 6]>],
+) -> Option<Target> {
+    let actor = actors
+        .iter()
+        .filter_map(|boxes| {
+            let padded = |b: &[f64; 6]| {
+                let r = ACTOR_PICK_RADIUS;
+                (
+                    [b[0] - r, b[1] - r, b[2] - r],
+                    [b[3] + r, b[4] + r, b[5] + r],
+                )
+            };
+            if boxes.iter().any(|b| {
+                let (min, max) = padded(b);
+                (0..3).all(|axis| min[axis] <= origin[axis] && origin[axis] <= max[axis])
+            }) {
+                return None;
+            }
+            let distance = boxes
+                .iter()
+                .filter_map(|b| {
+                    let (min, max) = padded(b);
+                    ray_box(origin, dir, min, max).filter(|t| *t <= reach)
+                })
+                .reduce(f64::min)?;
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for b in boxes {
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(b[axis]);
+                    max[axis] = max[axis].max(b[axis + 3]);
+                }
+            }
+            Some(Hit {
+                block: [0; 3],
+                min,
+                max,
+                distance,
+                direct: false,
+                boxes: Boxes::single(min, max),
+            })
+        })
+        .min_by(|a, b| a.distance.total_cmp(&b.distance));
+    let block = raycast(origin, dir, reach, &mut lookup);
+    let limit = block.as_ref().map_or(f64::INFINITY, |hit| hit.distance);
+    if let Some(actor) = actor {
+        if actor.distance + ACTOR_PICK_RADIUS < limit.min(reach) {
+            return Some(Target::Actor(actor));
+        }
+        if actor.distance + ACTOR_PICK_RADIUS < limit {
+            return None;
+        }
+    }
+    let hit = match block {
         Some(hit) => hit,
         None => support_hit(origin, dir, reach, &mut lookup)?,
     };
-    centre_within(hit.block, origin, reach).then_some(hit)
+    centre_within(hit.block, origin, reach).then_some(Target::Block(hit))
 }
 
 /// Whether the centre of `block` is within `reach` of `eye`, as Cinnabar trims its picks.
@@ -354,7 +1051,10 @@ pub fn support_hit(
             let max = min.map(|v| v + 1.0);
             ray_box(origin, dir, min, max).is_some_and(|t| t <= reach)
         });
-    aimed.then_some(hit)
+    aimed.then_some(Hit {
+        direct: false,
+        ..hit
+    })
 }
 
 /// The neighbour of `support` on the side facing the dominant horizontal look direction.
@@ -387,32 +1087,80 @@ fn ray_box(origin: [f64; 3], dir: [f64; 3], min: [f64; 3], max: [f64; 3]) -> Opt
     (near <= far && near >= 0.0).then_some(near)
 }
 
-/// Side of the sampled terrain cube: the host's largest query extent.
+/// Side of the largest terrain region the host answers.
 pub const REGION_EXTENT: i32 = 16;
 
-/// The terrain cube to sample, as inclusive minimum and exclusive maximum corners. Every block
-/// within `radius` of `eye_block` must be inside it. The current cube is kept while that holds
-/// with a one-block margin, so a new sample is requested before the player reaches the edge and
-/// the old one still covers the ray while the new one loads; otherwise the cube is recentred.
+/// The most blocks read beyond what the look ray needs on every side when a new region is
+/// requested, so small turns and steps keep using it.
+pub const REGION_SLACK: i32 = 2;
+
+/// Fuel one terrain read should use at most (of a frame's 200,000), judged by the last read's
+/// cost per block.
+pub const READ_FUEL_TARGET: f64 = 60_000.0;
+
+/// How many spare blocks a new region gets: as many as keep the read within
+/// `READ_FUEL_TARGET` at `fuel_per_cell` (what the last read cost per block), none before the
+/// first read, whose cost is unknown. `cells(slack)` is the region's size with that slack.
+pub fn region_slack(fuel_per_cell: Option<f64>, cells: impl Fn(i32) -> usize) -> i32 {
+    let Some(per_cell) = fuel_per_cell else {
+        return 0;
+    };
+    (1..=REGION_SLACK)
+        .rev()
+        .find(|&slack| per_cell * cells(slack) as f64 <= READ_FUEL_TARGET)
+        .unwrap_or(0)
+}
+
+/// The number of blocks in a region.
+pub fn region_cells((min, max): ([i32; 3], [i32; 3])) -> usize {
+    (0..3)
+        .map(|axis| (max[axis] - min[axis]).max(0) as usize)
+        .product()
+}
+
+/// The blocks the look ray can reach from `eye` within `reach`, and `pad` more on every side,
+/// as inclusive minimum and exclusive maximum corners. A pad of one covers the bridging
+/// support too: it is only looked for when the ray points steeply down, past its depth.
+pub fn ray_region(eye: [f64; 3], dir: [f64; 3], reach: f64, pad: i32) -> ([i32; 3], [i32; 3]) {
+    let mut min = [0; 3];
+    let mut max = [0; 3];
+    for axis in 0..3 {
+        let (a, b) = (eye[axis], eye[axis] + dir[axis] * reach);
+        min[axis] = a.min(b).floor() as i32 - pad;
+        max[axis] = a.max(b).floor() as i32 + 1 + pad;
+    }
+    (min, max)
+}
+
+/// Whether `region` holds every block the look ray needs.
+pub fn region_covers(
+    region: ([i32; 3], [i32; 3]),
+    eye: [f64; 3],
+    dir: [f64; 3],
+    reach: f64,
+) -> bool {
+    let (need_min, need_max) = ray_region(eye, dir, reach, 1);
+    (0..3).all(|axis| region.0[axis] <= need_min[axis] && need_max[axis] <= region.1[axis])
+}
+
+/// The terrain to sample: only the blocks along the look ray, not a cube around the player.
+/// Cinnabar sends the name and tags of every kind of block in a region, which costs the mod
+/// fuel per kind; on servers with many custom blocks a full cube can use up a whole frame. The
+/// current region is kept while it still holds the ray; otherwise a new one is requested with
+/// `slack` blocks to spare.
 pub fn region_for(
     current: Option<([i32; 3], [i32; 3])>,
-    eye_block: [i32; 3],
-    radius: i32,
+    eye: [f64; 3],
+    dir: [f64; 3],
+    reach: f64,
+    slack: i32,
 ) -> ([i32; 3], [i32; 3]) {
-    let slack = (REGION_EXTENT - (2 * radius + 1)).max(0);
-    let margin = (slack / 2).min(1);
-    if let Some((min, max)) = current {
-        let covers = (0..3).all(|axis| {
-            min[axis] <= eye_block[axis] - radius - margin
-                && eye_block[axis] + radius + margin < max[axis]
-        });
-        if covers {
-            return (min, max);
-        }
+    if let Some(region) = current
+        && region_covers(region, eye, dir, reach)
+    {
+        return region;
     }
-    let min = eye_block.map(|v| v - radius - slack / 2);
-    let max = min.map(|v| v + 2 * radius + 1 + slack);
-    (min, max)
+    ray_region(eye, dir, reach, 1 + slack)
 }
 
 /// Within this many blocks of the camera the outline keeps its full thickness.
@@ -441,12 +1189,30 @@ pub struct Face {
 
 /// The six faces of a box.
 pub const FACES: [Face; 6] = [
-    Face { axis: 0, max_side: false },
-    Face { axis: 0, max_side: true },
-    Face { axis: 1, max_side: false },
-    Face { axis: 1, max_side: true },
-    Face { axis: 2, max_side: false },
-    Face { axis: 2, max_side: true },
+    Face {
+        axis: 0,
+        max_side: false,
+    },
+    Face {
+        axis: 0,
+        max_side: true,
+    },
+    Face {
+        axis: 1,
+        max_side: false,
+    },
+    Face {
+        axis: 1,
+        max_side: true,
+    },
+    Face {
+        axis: 2,
+        max_side: false,
+    },
+    Face {
+        axis: 2,
+        max_side: true,
+    },
 ];
 
 impl Face {
@@ -487,7 +1253,10 @@ pub struct Edge {
 
 /// The twelve edges of a box, four along each axis.
 pub const EDGES: [Edge; 12] = {
-    let mut edges = [Edge { axis: 0, sides: [false, false] }; 12];
+    let mut edges = [Edge {
+        axis: 0,
+        sides: [false, false],
+    }; 12];
     let mut index = 0;
     while index < 12 {
         edges[index] = Edge {
@@ -527,13 +1296,21 @@ impl Edge {
         self.others()
             .into_iter()
             .zip(self.sides)
-            .any(|(axis, side)| if side { camera[axis] > max[axis] } else { camera[axis] < min[axis] })
+            .any(|(axis, side)| {
+                if side {
+                    camera[axis] > max[axis]
+                } else {
+                    camera[axis] < min[axis]
+                }
+            })
     }
 
     /// World-space start and end points on the box.
     pub fn points(self, min: [f64; 3], max: [f64; 3]) -> [[f32; 3]; 2] {
         self.unit_points().map(|unit| {
-            std::array::from_fn(|axis| (min[axis] + f64::from(unit[axis]) * (max[axis] - min[axis])) as f32)
+            std::array::from_fn(|axis| {
+                (min[axis] + f64::from(unit[axis]) * (max[axis] - min[axis])) as f32
+            })
         })
     }
 }
@@ -555,7 +1332,10 @@ mod tests {
         assert_eq!(parse_color("0f0"), Some([0, 255, 0, 255]));
         assert_eq!(parse_color("#11223344"), Some([0x11, 0x22, 0x33, 0x44]));
         assert_eq!(Settings::parse(""), Settings::default());
-        assert_eq!(Settings::parse("{\"color\": \"nope\"}"), Settings::default());
+        assert_eq!(
+            Settings::parse("{\"color\": \"nope\"}"),
+            Settings::default()
+        );
     }
 
     #[test]
@@ -566,6 +1346,24 @@ mod tests {
             width: 3.5,
             fill: 35,
             reach: 5.0,
+            menu_key: KeyName::new("KeyE").unwrap(),
+            fill_rgb: Some([1, 2, 3]),
+            pulse: true,
+            highlight_cancel: 40,
+            mob: Style {
+                rgba: [200, 10, 20, 128],
+                rainbow: false,
+                width: 6.5,
+                fill: 0,
+                fill_rgb: None,
+                pulse: false,
+            },
+            show_all_mobs: false,
+            aim_rgb: [9, 9, 9],
+            fullbright: true,
+            fullbright_key: KeyName::new("KeyB"),
+            favourites: [Some([9, 8, 7, 6]), None, Some([255, 0, 0, 255]), None],
+            next_favourite: 3,
         };
         assert_eq!(Settings::parse(&s.to_json()), s);
         let legacy = Settings::parse(r#"{"color": "rainbow", "width": 3, "reach": 6}"#);
@@ -588,13 +1386,20 @@ mod tests {
     #[test]
     fn raycast_hits_first_solid_block_within_reach() {
         let solid = |p: [i32; 3]| {
-            if p == [0, 64, -3] { Cell::Boxes(vec![FULL]) } else { Cell::Boxes(vec![]) }
+            if p == [0, 64, -3] {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
         };
         let hit = raycast([0.5, 64.5, 0.5], [0.0, 0.0, -1.0], 6.0, solid).unwrap();
         assert_eq!(hit.block, [0, 64, -3]);
         assert_eq!(hit.min, [0.0, 64.0, -3.0]);
         assert_eq!(hit.max, [1.0, 65.0, -2.0]);
-        assert_eq!(raycast([0.5, 64.5, 0.5], [0.0, 0.0, -1.0], 2.0, solid), None);
+        assert_eq!(
+            raycast([0.5, 64.5, 0.5], [0.0, 0.0, -1.0], 2.0, solid),
+            None
+        );
     }
 
     #[test]
@@ -609,16 +1414,27 @@ mod tests {
         let hit = raycast([0.5, 64.75, 0.5], [0.0, 0.0, -1.0], 6.0, world).unwrap();
         assert_eq!(hit.block, [0, 64, -2]);
         let unknown = |p: [i32; 3]| {
-            if p == [0, 64, -1] { Cell::Unknown } else { Cell::Boxes(vec![FULL]) }
+            if p == [0, 64, -1] {
+                Cell::Unknown
+            } else {
+                Cell::Boxes(vec![FULL])
+            }
         };
-        assert_eq!(raycast([0.5, 64.5, 0.5], [0.0, 0.0, -1.0], 6.0, unknown), None);
+        assert_eq!(
+            raycast([0.5, 64.5, 0.5], [0.0, 0.0, -1.0], 6.0, unknown),
+            None
+        );
     }
 
     #[test]
     fn diagonal_ray_finds_block() {
         let dir = look_direction(0.6, -0.7);
         let target = |p: [i32; 3]| {
-            if p[1] <= 62 { Cell::Boxes(vec![FULL]) } else { Cell::Boxes(vec![]) }
+            if p[1] <= 62 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
         };
         let hit = raycast([0.3, 64.62, 0.7], dir, 6.0, target).unwrap();
         assert_eq!(hit.block[1], 62);
@@ -628,30 +1444,59 @@ mod tests {
     fn bridging_outlines_the_block_underfoot_only_when_looking_steeply_down() {
         // Standing at the edge of a one-block-wide bridge along -Z; the void lies ahead.
         let bridge = |p: [i32; 3]| {
-            if p[0] == 0 && p[1] == 63 && p[2] >= 0 { Cell::Boxes(vec![FULL]) } else { Cell::Boxes(vec![]) }
+            if p[0] == 0 && p[1] == 63 && p[2] >= 0 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
         };
         let eye = [0.5, 65.62, 0.3];
         // Aiming into the empty cell in front of the bridge's end, [0, 63, -1].
         let steep = look_direction(0.0, -1.35);
-        assert_eq!(raycast(eye, steep, 6.0, bridge), None, "the look ray misses into the void");
+        assert_eq!(
+            raycast(eye, steep, 6.0, bridge),
+            None,
+            "the look ray misses into the void"
+        );
         assert_eq!(placement_cell([0, 63, 0], steep), [0, 63, -1]);
-        assert_eq!(support_hit(eye, steep, 6.0, bridge).unwrap().block, [0, 63, 0]);
+        assert_eq!(
+            support_hit(eye, steep, 6.0, bridge).unwrap().block,
+            [0, 63, 0]
+        );
         // Steep enough, but aiming two blocks ahead: the ray passes over the placement cell.
         let ahead = look_direction(0.0, -0.8);
         assert!(ahead[1] < SUPPORT_MAX_Y);
         assert_eq!(support_hit(eye, ahead, 6.0, bridge), None);
         let shallow = look_direction(0.0, -0.6);
-        assert_eq!(support_hit(eye, shallow, 6.0, bridge), None, "y -0.56 is not steep enough");
+        assert_eq!(
+            support_hit(eye, shallow, 6.0, bridge),
+            None,
+            "y -0.56 is not steep enough"
+        );
         // Facing diagonally (yaw 45°, towards -x -z), aiming into the corner gap.
         let diagonal = look_direction(std::f32::consts::FRAC_PI_4, -1.3);
         assert!(diagonal[0] < 0.0 && diagonal[2] < 0.0);
-        assert_eq!(support_hit([0.5, 65.62, 0.5], diagonal, 6.0, bridge).unwrap().block, [0, 63, 0]);
+        assert_eq!(
+            support_hit([0.5, 65.62, 0.5], diagonal, 6.0, bridge)
+                .unwrap()
+                .block,
+            [0, 63, 0]
+        );
         // Bridging straight along -z but aiming into the side gap at -x, and the far corner.
         let side = [-0.62, -0.78, 0.0];
         assert!(side[1] < SUPPORT_MAX_Y);
-        let unit = |v: [f64; 3]| { let l = (v[0]*v[0]+v[1]*v[1]+v[2]*v[2]).sqrt(); v.map(|c| c / l) };
-        assert!(support_hit([0.5, 65.62, 0.5], unit(side), 6.0, bridge).is_some(), "side gap");
-        assert!(support_hit([0.5, 65.62, 0.5], unit([-0.45, -0.78, -0.45]), 6.0, bridge).is_some(), "corner");
+        let unit = |v: [f64; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            v.map(|c| c / l)
+        };
+        assert!(
+            support_hit([0.5, 65.62, 0.5], unit(side), 6.0, bridge).is_some(),
+            "side gap"
+        );
+        assert!(
+            support_hit([0.5, 65.62, 0.5], unit([-0.45, -0.78, -0.45]), 6.0, bridge).is_some(),
+            "corner"
+        );
         // Diagonally, a look steep enough to bridge (y below -0.7) lands at most ~1.6 blocks out,
         // still inside the corner gap, so the outline shows across that whole range.
         let shallowest = look_direction(std::f32::consts::FRAC_PI_4, -0.8);
@@ -664,55 +1509,392 @@ mod tests {
     #[test]
     fn width_shrinks_with_distance_but_not_up_close() {
         let (min, max) = ([0.0; 3], [1.0; 3]);
-        assert_eq!(width_at(4.0, min, max, [0.5, 0.5, 2.5]), 4.0, "2 blocks away");
-        assert_eq!(width_at(4.0, min, max, [0.5, 0.5, 5.5]), 2.0, "5 blocks away: half");
-        assert_eq!(width_at(1.5, min, max, [0.5, 0.5, 20.5]), 1.0, "never below one pixel");
+        assert_eq!(
+            width_at(4.0, min, max, [0.5, 0.5, 2.5]),
+            4.0,
+            "2 blocks away"
+        );
+        assert_eq!(
+            width_at(4.0, min, max, [0.5, 0.5, 5.5]),
+            2.0,
+            "5 blocks away: half"
+        );
+        assert_eq!(
+            width_at(1.5, min, max, [0.5, 0.5, 20.5]),
+            1.0,
+            "never below one pixel"
+        );
         assert_eq!(width_at(1.0, min, max, [0.5, 0.5, 20.5]), 1.0);
     }
 
     #[test]
-    fn region_is_kept_until_the_player_nears_its_edge() {
-        let (min, max) = region_for(None, [0, 64, 0], 6);
-        assert_eq!((min, max), ([-7, 57, -7], [9, 73, 9]), "16 blocks, 3 spare split 1/2");
-        let mut current = (min, max);
-        let mut requeries = 0;
-        for x in 0..12 {
-            let next = region_for(Some(current), [x, 64, 0], 6);
-            // Whatever happens, the reach around the player is always covered.
-            assert!(next.0[0] <= x - 6 && x + 6 < next.1[0]);
-            if next != current {
-                requeries += 1;
-                // The old cube still covered the reach when it was replaced.
-                assert!(current.0[0] <= x - 6 && x + 6 < current.1[0]);
+    fn region_follows_the_look_ray() {
+        let eye = [0.5, 65.62, 0.5];
+        let volume =
+            |(min, max): ([i32; 3], [i32; 3])| (0..3).map(|a| max[a] - min[a]).product::<i32>();
+        // Every direction at the longest reach fits the host's extent and holds the ray.
+        for yaw in 0..16 {
+            for pitch in -4..=4 {
+                let dir = look_direction(yaw as f32 * 0.4, pitch as f32 * 0.38);
+                let region = region_for(None, eye, dir, f64::from(MAX_REACH), REGION_SLACK);
+                assert!(
+                    (0..3).all(|a| region.1[a] - region.0[a] <= REGION_EXTENT),
+                    "{region:?}"
+                );
+                assert!(region_covers(region, eye, dir, f64::from(MAX_REACH)));
+                let end = (0..3)
+                    .map(|a| eye[a] + dir[a] * f64::from(MAX_REACH))
+                    .collect::<Vec<_>>();
+                assert!(
+                    (0..3).all(
+                        |a| f64::from(region.0[a]) <= end[a] && end[a] < f64::from(region.1[a])
+                    )
+                );
             }
-            current = next;
         }
-        assert!(requeries <= 6, "{requeries} requests for 12 blocks walked");
-        // Maximum reach leaves one spare block and no margin: recentre on every move, as before.
-        let (min, max) = region_for(None, [0, 64, 0], 7);
-        assert_eq!(max[0] - min[0], 16);
-        // The cube is always 16 blocks, so a shorter reach keeps the current one.
-        assert_eq!(region_for(Some((min, max)), [0, 64, 0], 3), (min, max));
+        // Looking straight ahead reads far fewer blocks than the old 16-block cube.
+        let ahead = region_for(None, eye, [0.0, 0.0, -1.0], 5.7, REGION_SLACK);
+        assert!(volume(ahead) * 4 < 16 * 16 * 16, "{}", volume(ahead));
+        // Small turns and steps keep the region; a big turn asks for a new one.
+        let turned = look_direction(0.15, 0.1);
+        assert_eq!(region_for(Some(ahead), eye, turned, 5.7, 0), ahead);
+        assert_eq!(
+            region_for(Some(ahead), [0.9, 65.62, 0.2], [0.0, 0.0, -1.0], 5.7, 0),
+            ahead
+        );
+        assert_ne!(region_for(Some(ahead), eye, [1.0, 0.0, 0.0], 5.7, 0), ahead);
+        // Looking steeply down holds the bridging support's depth and its neighbours.
+        let down = look_direction(0.0, -1.2);
+        let (min, max) = region_for(None, eye, down, 5.7, 0);
+        assert!(min[1] <= (eye[1] - SUPPORT_DEPTH).floor() as i32 && min[0] <= -1 && 1 < max[0]);
+        assert_eq!(
+            volume(region_for(None, eye, [0.0, 0.0, -1.0], 5.7, 0)) as usize,
+            region_cells(ray_region(eye, [0.0, 0.0, -1.0], 5.7, 1))
+        );
+    }
+
+    #[test]
+    fn region_slack_follows_what_reads_cost() {
+        let cells = |slack: i32| {
+            region_cells(ray_region(
+                [0.5, 65.62, 0.5],
+                [0.0, 0.0, -1.0],
+                5.7,
+                1 + slack,
+            ))
+        };
+        // Unknown cost: the smallest region first.
+        assert_eq!(region_slack(None, cells), 0);
+        // Cheap blocks: the full slack; dear ones: less; very dear: none.
+        assert_eq!(region_slack(Some(10.0), cells), REGION_SLACK);
+        let between = READ_FUEL_TARGET / cells(1) as f64;
+        assert_eq!(region_slack(Some(between), cells), 1);
+        assert_eq!(region_slack(Some(10_000.0), cells), 0);
     }
 
     #[test]
     fn far_blocks_need_their_centre_within_reach() {
         // A wall along z = -6 in front of the eye: the ray reaches its face at 5.5, inside 5.7,
         // but the block's centre is 6.0 away, so Cinnabar targets nothing.
-        let wall = |p: [i32; 3]| if p[2] == -6 { Cell::Boxes(vec![FULL]) } else { Cell::Boxes(vec![]) };
+        let wall = |p: [i32; 3]| {
+            if p[2] == -6 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
         let eye = [0.5, 64.5, 0.5];
         let ahead = [0.0, 0.0, -1.0];
         assert!(raycast(eye, ahead, 5.7, wall).is_some());
         assert_eq!(target(eye, ahead, 5.7, wall), None);
         // One block closer, the centre is 5.0 away and it is targeted.
-        let near = |p: [i32; 3]| if p[2] == -5 { Cell::Boxes(vec![FULL]) } else { Cell::Boxes(vec![]) };
+        let near = |p: [i32; 3]| {
+            if p[2] == -5 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
         assert_eq!(target(eye, ahead, 5.7, near).unwrap().block, [0, 64, -5]);
+    }
+
+    #[test]
+    fn hex_codes_and_the_wheel_round_trip() {
+        assert_eq!(hex_code([255, 136, 0, 255]), "#FF8800");
+        assert_eq!(hex_code([1, 2, 3, 4]), "#01020304");
+        for rgba in [[255, 136, 0, 255], [1, 2, 3, 4], [80, 255, 60, 255]] {
+            assert_eq!(parse_color(&hex_code(rgba)), Some(rgba));
+        }
+        // Red is at the right edge, cyan at the left, white in the middle.
+        assert_eq!(wheel_colour(1.0, 0.5, 1.0), [255, 0, 0]);
+        assert_eq!(wheel_colour(0.0, 0.5, 1.0), [0, 255, 255]);
+        assert_eq!(wheel_colour(0.5, 0.5, 1.0), [255, 255, 255]);
+        // Outside the disc clamps to full saturation; brightness is kept.
+        assert_eq!(wheel_colour(2.0, 0.5, 0.5), [128, 0, 0]);
+        for rgb in [
+            [255, 136, 0],
+            [40, 90, 255],
+            [170, 60, 255],
+            [255, 255, 255],
+        ] {
+            let [x, y] = wheel_position(rgb);
+            let [_, _, value] = rgb_to_hsv(rgb);
+            let back = wheel_colour(x, y, value);
+            for c in 0..3 {
+                assert!(back[c].abs_diff(rgb[c]) <= 2, "{rgb:?} -> {back:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn mobs_in_front_win_over_blocks_like_cinnabar() {
+        let wall = |p: [i32; 3]| {
+            if p[2] == -4 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
+        let eye = [0.5, 64.5, 0.5];
+        let ahead = [0.0, 0.0, -1.0];
+        let mob_at = |z: f64| vec![[0.2, 64.0, z - 0.3, 0.8, 65.0, z + 0.3]];
+        // A mob 2 blocks ahead, in front of the wall at 3.5: its hitbox is outlined.
+        match target_with_actors(eye, ahead, 5.7, wall, &[mob_at(-1.5)]) {
+            Some(Target::Actor(hit)) => assert_eq!(hit.max, [0.8, 65.0, -1.2]),
+            other => panic!("{other:?}"),
+        }
+        // Behind the wall, the wall wins.
+        assert!(matches!(
+            target_with_actors(eye, ahead, 5.7, wall, &[mob_at(-5.5)]),
+            Some(Target::Block(_))
+        ));
+        // Off to the side, the ray misses it.
+        let beside = vec![[3.0, 64.0, -2.0, 3.6, 65.0, -1.4]];
+        assert!(matches!(
+            target_with_actors(eye, ahead, 5.7, wall, &[beside]),
+            Some(Target::Block(_))
+        ));
+        // Your own body, around the eye, never counts.
+        let me = vec![[0.2, 63.0, 0.2, 0.8, 64.8, 0.8]];
+        assert!(matches!(
+            target_with_actors(eye, ahead, 5.7, wall, &[me]),
+            Some(Target::Block(_))
+        ));
+        // A mob in front of the void blocks the bridging fallback too.
+        let steep = look_direction(0.0, -1.35);
+        let floor = |p: [i32; 3]| {
+            if p == [0, 63, 0] {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
+        let eye = [0.5, 65.62, 0.3];
+        assert!(target_with_actors(eye, steep, 5.7, floor, &[]).is_some());
+        let mob_below = vec![[0.0, 63.0, -1.0, 1.0, 64.0, 0.0]];
+        assert!(matches!(
+            target_with_actors(eye, steep, 5.7, floor, &[mob_below]),
+            Some(Target::Actor(_))
+        ));
+    }
+
+    #[test]
+    fn favourites_reset_and_pulse() {
+        let mut s = Settings::default();
+        s.menu_key = KeyName::new("KeyG").unwrap();
+        for index in 0..5u8 {
+            s.save_favourite([index, 0, 0, 255]);
+        }
+        // Five saves into four slots: the oldest was replaced.
+        assert_eq!(s.favourites[0], Some([4, 0, 0, 255]));
+        assert_eq!(s.favourites[1], Some([1, 0, 0, 255]));
+        assert_eq!(Settings::parse(&s.to_json()), s);
+        s.width = 7.0;
+        s.pulse = true;
+        s.fill_rgb = Some([1, 2, 3]);
+        let favourites = s.favourites;
+        s.reset();
+        assert_eq!(s.width, Settings::default().width);
+        assert_eq!(s.fill_rgb, None);
+        assert_eq!(s.favourites, favourites, "favourites survive a reset");
+        assert_eq!(s.menu_key.as_str(), "KeyG", "the menu key survives a reset");
+        assert_eq!(s.pulse_factor(0.3), 1.0, "pulse off");
+        s.pulse = true;
+        let range = (0..60).map(|i| s.pulse_factor(i as f32 * 0.05));
+        let (low, high) = range.fold((1.0f32, 0.0f32), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        assert!(
+            low >= 0.45 - 1e-3 && low < 0.5 && high > 0.99,
+            "{low} {high}"
+        );
+    }
+
+    #[test]
+    fn shape_edges_follow_the_merged_shape() {
+        // One box: its 12 edges.
+        assert_eq!(shape_edges(&[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]).len(), 12);
+        // Two halves of a cube: still 12 edges, no line across the faces where they meet.
+        let halves = [
+            [0.0, 0.0, 0.0, 1.0, 0.5, 1.0],
+            [0.0, 0.5, 0.0, 1.0, 1.0, 1.0],
+        ];
+        let edges = shape_edges(&halves);
+        let total: f64 = edges.iter().map(|s| s.length).sum();
+        assert!((total - 12.0).abs() < 1e-6, "{edges:?}");
+        assert!(
+            edges
+                .iter()
+                .all(|s| s.start[1] < 0.25 || s.start[1] > 0.75 || s.axis == 1)
+        );
+        // A stair: an L-shaped section along x has 6 corners, so 6 lines along x and 6 at each
+        // end: 18 edges in all.
+        let stair = [
+            [0.0, 0.0, 0.0, 1.0, 0.5, 1.0],
+            [0.0, 0.5, 0.0, 1.0, 1.0, 0.5],
+        ];
+        let lines = shape_edges(&stair);
+        let along_x = lines.iter().filter(|s| s.axis == 0).count();
+        assert_eq!(along_x, 6, "{lines:?}");
+        let corners: f64 = lines.iter().filter(|s| s.axis != 0).map(|s| s.length).sum();
+        assert!(
+            (corners - 2.0 * (1.0 + 1.0 + 0.5 + 0.5 + 0.5 + 0.5)).abs() < 1e-6,
+            "{lines:?}"
+        );
+        // The step's inner corner is seen from above in front, not from below behind.
+        let step = lines
+            .iter()
+            .find(|s| {
+                s.axis == 0 && (s.start[1] - 0.5).abs() < 1e-9 && (s.start[2] - 0.5).abs() < 1e-9
+            })
+            .expect("the step line");
+        assert!(step.visible([0.5, 2.0, 2.0]));
+        assert!(!step.visible([0.5, -1.0, -1.0]));
+        // The single-box path matches the general one, piece for piece.
+        for b in [
+            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            [0.25, 0.0, 0.1, 0.75, 0.5, 0.9],
+        ] {
+            let fast = shape_edges(&[b]);
+            // The same box twice takes the general path and gives the same outline.
+            let general = shape_edges(&[b, b]);
+            assert_eq!(fast.len(), general.len());
+            for segment in &general {
+                assert!(fast.contains(segment), "{segment:?} not in {fast:?}");
+            }
+        }
+        // A single box's edge is visible exactly as the old cube test said.
+        for camera in [[3.0, 0.5, 0.5], [0.5, 3.0, -2.0], [-2.0, -2.0, -2.0]] {
+            let lines = shape_edges(&[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]);
+            let seen = lines.iter().filter(|s| s.visible(camera)).count();
+            let expected = EDGES
+                .iter()
+                .filter(|e| e.visible([0.0; 3], [1.0; 3], camera))
+                .count();
+            assert_eq!(seen, expected, "{camera:?}");
+        }
+    }
+
+    #[test]
+    fn only_cinnabars_own_selection_counts_as_direct() {
+        // Undoing the highlight: brightened by 1.3 after darkening by the cancel layer is 1.
+        assert!(((1.0 - highlight_cancel_alpha(100)) * GAME_HIGHLIGHT_GAIN - 1.0).abs() < 1e-6);
+        assert_eq!(highlight_cancel_alpha(0), 0.0);
+        assert!(highlight_cancel_alpha(50) < highlight_cancel_alpha(100));
+        assert_eq!(step_highlight_cancel(50, true), 55);
+        assert_eq!(step_highlight_cancel(50, false), 45);
+        assert_eq!(step_highlight_cancel(100, true), 100);
+        assert_eq!(step_highlight_cancel(0, false), 0);
+        assert_eq!(step_highlight_cancel(42, false), 40);
+        assert_eq!(step_highlight_cancel(42, true), 45);
+        assert_eq!(
+            Settings::parse(r#"{"hide_game_highlight": true}"#).highlight_cancel,
+            50
+        );
+        assert_eq!(
+            Settings::parse(r#"{"highlight_cancel": 70}"#).highlight_cancel,
+            70
+        );
+        // Mobs start from the block look in older files, then keep their own.
+        let old = Settings::parse(r##"{"color": "#010203", "width": 5, "fill_color": "#040506"}"##);
+        assert_eq!(
+            old.mob,
+            crate::outline::Style {
+                fill_rgb: None,
+                ..old.style()
+            },
+            "mob fill follows its line"
+        );
+        let mut s = old;
+        let mut mobs = s.for_mobs();
+        mobs.rgba = [200, 0, 0, 255];
+        mobs.width = 2.0;
+        mobs.menu_key = KeyName::new("KeyK").unwrap();
+        s.store_mob(&mobs);
+        assert_eq!(s.style(), old.style(), "the block look is untouched");
+        assert_eq!((s.mob.rgba, s.mob.width), ([200, 0, 0, 255], 2.0));
+        assert_eq!(
+            s.menu_key.as_str(),
+            "KeyK",
+            "shared settings edited on the mob page stay"
+        );
+        s.reset();
+        assert_eq!(
+            s.mob.rgba,
+            [200, 0, 0, 255],
+            "resetting blocks keeps the mob look"
+        );
+        let pulsing = Settings::parse(r#"{"pulse": true, "mob_pulse": true}"#);
+        assert!(
+            pulsing.pulse && !pulsing.mob.pulse,
+            "mob hitboxes never pulse"
+        );
+        let aimed = s.aimed();
+        assert_eq!((aimed.rgba, aimed.width), ([255, 60, 60, 255], 2.0));
+        assert_eq!(
+            Settings::parse(&Settings::default().to_json()),
+            Settings::default()
+        );
+        let wall = |p: [i32; 3]| {
+            if p[2] == -3 {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
+        let eye = [0.5, 64.5, 0.5];
+        match target_with_actors(eye, [0.0, 0.0, -1.0], 5.7, wall, &[]) {
+            Some(Target::Block(hit)) => assert!(hit.direct),
+            other => panic!("{other:?}"),
+        }
+        let mob = vec![[0.2, 64.0, -1.8, 0.8, 65.0, -1.2]];
+        match target_with_actors(eye, [0.0, 0.0, -1.0], 5.7, wall, &[mob]) {
+            Some(Target::Actor(hit)) => assert!(!hit.direct),
+            other => panic!("{other:?}"),
+        }
+        // The bridging support is the mod's own addition; Cinnabar highlights nothing there.
+        let floor = |p: [i32; 3]| {
+            if p == [0, 63, 0] {
+                Cell::Boxes(vec![FULL])
+            } else {
+                Cell::Boxes(vec![])
+            }
+        };
+        let steep = look_direction(0.0, -1.35);
+        assert!(
+            !support_hit([0.5, 65.62, 0.3], steep, 5.7, floor)
+                .unwrap()
+                .direct
+        );
     }
 
     #[test]
     fn faces_match_their_edges() {
         let (min, max) = ([0.0; 3], [1.0; 3]);
-        for camera in [[0.5, 3.0, 0.5], [3.0, 3.0, 3.0], [-2.0, 0.5, 0.5], [0.5, 0.5, 0.5]] {
+        for camera in [
+            [0.5, 3.0, 0.5],
+            [3.0, 3.0, 3.0],
+            [-2.0, 0.5, 0.5],
+            [0.5, 0.5, 0.5],
+        ] {
             let faces = FACES.iter().filter(|f| f.visible(min, max, camera)).count();
             let edges = EDGES.iter().filter(|e| e.visible(min, max, camera)).count();
             // Visible faces share edges pairwise: 1 face 4 edges, 2 faces 7, 3 faces 9.
@@ -720,7 +1902,11 @@ mod tests {
         }
         for face in FACES {
             let corners = face.unit_corners();
-            assert!(corners.iter().all(|c| c[face.axis] == if face.max_side { 1.0 } else { 0.0 }));
+            assert!(
+                corners
+                    .iter()
+                    .all(|c| c[face.axis] == if face.max_side { 1.0 } else { 0.0 })
+            );
         }
     }
 

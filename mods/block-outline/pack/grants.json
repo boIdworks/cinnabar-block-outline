@@ -3,5 +3,9 @@
   "world_draw": true,
   "render": true,
   "settings": true,
-  "controls": true
+  "controls": true,
+  "hud": true,
+  "players": true,
+  "entities": true,
+  "fullbright": true
 }
