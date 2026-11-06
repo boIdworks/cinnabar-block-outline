@@ -43,6 +43,8 @@ pub struct Settings {
     pub counter: crate::counter::Counter,
     /// Zoom, set on the menu's Zoom page.
     pub zoom: crate::zoom::Zoom,
+    /// The clicks-per-second readout, set on the menu's Arrow counter page.
+    pub cps: crate::cps::Cps,
 }
 
 /// The aimed mob's default colour: a clear red.
@@ -183,6 +185,7 @@ impl Default for Settings {
             next_favourite: 0,
             counter: crate::counter::Counter::default(),
             zoom: crate::zoom::Zoom::default(),
+            cps: crate::cps::Cps::default(),
         }
     }
 }
@@ -319,10 +322,46 @@ impl Settings {
             number_field(json, "arrow_counter_x"),
             number_field(json, "arrow_counter_y"),
         ) {
-            settings.counter.pos = crate::counter::clamp_pos([x, y]);
+            use crate::counter::{Anchor, Pos};
+            let anchor = |key| string_field(json, key).and_then(Anchor::from_name);
+            // Without anchors (older files) the numbers are fractions of the screen.
+            settings.counter.pos = match (
+                anchor("arrow_counter_anchor_x"),
+                anchor("arrow_counter_anchor_y"),
+            ) {
+                (Some(ax), Some(ay)) => Pos {
+                    anchor: [ax, ay],
+                    off: [x, y],
+                }
+                .sanitised(),
+                _ => Pos::fraction(x, y),
+            };
         }
         if let Some(scale) = number_field(json, "arrow_counter_scale") {
             settings.counter.scale = crate::counter::clamp_scale(scale);
+        }
+        if let Some(on) = bool_field(json, "cps") {
+            settings.cps.on = on;
+        }
+        if let Some(right) = bool_field(json, "cps_right") {
+            settings.cps.right = right;
+        }
+        if let Some(zeros) = bool_field(json, "cps_zeros") {
+            settings.cps.zeros = zeros;
+        }
+        if let (Some(x), Some(y)) = (number_field(json, "cps_x"), number_field(json, "cps_y")) {
+            use crate::counter::{Anchor, Pos};
+            let anchor = |key| string_field(json, key).and_then(Anchor::from_name);
+            if let (Some(ax), Some(ay)) = (anchor("cps_anchor_x"), anchor("cps_anchor_y")) {
+                settings.cps.pos = Pos {
+                    anchor: [ax, ay],
+                    off: [x, y],
+                }
+                .sanitised();
+            }
+        }
+        if let Some(scale) = number_field(json, "cps_scale") {
+            settings.cps.scale = crate::cps::clamp_scale(scale);
         }
         settings
     }
@@ -388,9 +427,31 @@ impl Settings {
         );
         field("arrow_counter", self.counter.on.to_string());
         field("arrow_counter_bow_only", self.counter.bow_only.to_string());
-        field("arrow_counter_x", self.counter.pos[0].to_string());
-        field("arrow_counter_y", self.counter.pos[1].to_string());
+        field("arrow_counter_x", self.counter.pos.off[0].to_string());
+        field("arrow_counter_y", self.counter.pos.off[1].to_string());
+        field(
+            "arrow_counter_anchor_x",
+            format!("\"{}\"", self.counter.pos.anchor[0].name()),
+        );
+        field(
+            "arrow_counter_anchor_y",
+            format!("\"{}\"", self.counter.pos.anchor[1].name()),
+        );
         field("arrow_counter_scale", self.counter.scale.to_string());
+        field("cps", self.cps.on.to_string());
+        field("cps_right", self.cps.right.to_string());
+        field("cps_zeros", self.cps.zeros.to_string());
+        field("cps_x", self.cps.pos.off[0].to_string());
+        field("cps_y", self.cps.pos.off[1].to_string());
+        field(
+            "cps_anchor_x",
+            format!("\"{}\"", self.cps.pos.anchor[0].name()),
+        );
+        field(
+            "cps_anchor_y",
+            format!("\"{}\"", self.cps.pos.anchor[1].name()),
+        );
+        field("cps_scale", self.cps.scale.to_string());
         field("menu_key", format!("\"{}\"", self.menu_key.as_str()));
         out.truncate(out.len() - 2);
         out.push_str(
@@ -415,6 +476,7 @@ impl Settings {
             next_favourite: self.next_favourite,
             counter: self.counter,
             zoom: self.zoom,
+            cps: self.cps,
             ..Self::default()
         };
     }
@@ -1431,7 +1493,10 @@ mod tests {
             counter: crate::counter::Counter {
                 on: false,
                 bow_only: true,
-                pos: [0.3, 0.6],
+                pos: crate::counter::Pos {
+                    anchor: [crate::counter::Anchor::Start, crate::counter::Anchor::End],
+                    off: [30.5, -12.25],
+                },
                 scale: 2.5,
             },
             zoom: crate::zoom::Zoom {
@@ -1444,6 +1509,16 @@ mod tests {
                 step: 35,
                 // Unbound: written as an empty name and read back as none.
                 key: None,
+            },
+            cps: crate::cps::Cps {
+                on: false,
+                right: false,
+                zeros: false,
+                pos: crate::counter::Pos {
+                    anchor: [crate::counter::Anchor::End, crate::counter::Anchor::Centre],
+                    off: [-14.5, 3.25],
+                },
+                scale: 1.7,
             },
         };
         assert_eq!(Settings::parse(&s.to_json()), s);
@@ -1805,7 +1880,10 @@ mod tests {
         s.pulse = true;
         let range = (0..60).map(|i| s.pulse_factor(i as f32 * 0.05));
         let (low, high) = range.fold((1.0f32, 0.0f32), |(lo, hi), v| (lo.min(v), hi.max(v)));
-        assert!((0.45 - 1e-3..0.5).contains(&low) && high > 0.99, "{low} {high}");
+        assert!(
+            (0.45 - 1e-3..0.5).contains(&low) && high > 0.99,
+            "{low} {high}"
+        );
     }
 
     #[test]

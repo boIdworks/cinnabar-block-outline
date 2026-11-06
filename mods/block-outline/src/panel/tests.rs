@@ -1,5 +1,10 @@
 use super::*;
-use super::{bindings::{CAPTURE_MENU, CAPTURE_OPTIONAL}, controls::*, help::*, json::*};
+use super::{
+    bindings::{CAPTURE_MENU, CAPTURE_OPTIONAL},
+    controls::*,
+    help::*,
+    json::*,
+};
 use crate::outline::KeyName;
 
 const FILL: MenuState = MenuState {
@@ -14,7 +19,9 @@ const FILL: MenuState = MenuState {
     confirm: Reset::None,
     focus: None,
     moving: false,
+    moving_cps: false,
     guide_bottom: false,
+    fuel_k: [0, 0],
 };
 
 /// A page's state, with the colour tools open or not.
@@ -31,10 +38,17 @@ fn switch_on(update: &str, name: &str) -> bool {
     let right = PILL_W - KNOB - KNOB_OFF;
     let knob = format!(r##""#{name}_knob":[{right},0]"##);
     let off = format!(r##""#{name}_knob":[{KNOB_OFF},0]"##);
-    assert!(update.contains(&knob) != update.contains(&off), "{name} has exactly one knob place");
+    assert!(
+        update.contains(&knob) != update.contains(&off),
+        "{name} has exactly one knob place"
+    );
     let on = update.contains(&knob);
     let colour = format!(r##""#{name}_bg":[0.45,0.24,0.75,1]"##);
-    assert_eq!(update.contains(&colour), on, "{name}'s pill follows its knob");
+    assert_eq!(
+        update.contains(&colour),
+        on,
+        "{name}'s pill follows its knob"
+    );
     on
 }
 
@@ -248,9 +262,17 @@ fn menu_key_capture_and_hover_help() {
         Some("Resets this page; click twice to confirm")
     );
     // The start page has the page buttons and the menu key; the mob page no highlight fix.
-    let home = |point| tip_at(point, MenuState::default(), false).map(|index| controls()[index].tip);
+    let home =
+        |point| tip_at(point, MenuState::default(), false).map(|index| controls()[index].tip);
+    let lighting = |point| {
+        let state = MenuState {
+            page: Page::Lighting,
+            ..MenuState::default()
+        };
+        tip_at(point, state, false).map(|index| controls()[index].tip)
+    };
     assert_eq!(
-        home([15.0, HOME_FULLBRIGHT_Y + 5.0]),
+        lighting([15.0, LIGHT_ON_Y + 5.0]),
         Some("Lights up caves and nights (only you)")
     );
     let mut lit = Settings::default();
@@ -261,9 +283,13 @@ fn menu_key_capture_and_hover_help() {
         1.0
     ));
     assert!(lit.fullbright);
-    assert!(switch_on(&update(&lit, 0.0, MenuState::default()), "fullbright"));
+    assert!(switch_on(
+        &update(&lit, 0.0, MenuState::default()),
+        "fullbright"
+    ));
     assert!(
-        update(&lit, 0.0, MenuState::default()).contains(r##""#fullbright_key_text":"Click to set""##)
+        update(&lit, 0.0, MenuState::default())
+            .contains(r##""#fullbright_key_text":"Click to set""##)
     );
     let waiting = MenuState {
         capturing_fullbright: true,
@@ -273,7 +299,7 @@ fn menu_key_capture_and_hover_help() {
     lit.fullbright_key = crate::outline::KeyName::new("KeyB");
     assert!(update(&lit, 0.0, MenuState::default()).contains(r##""#fullbright_key_text":"B""##));
     assert_eq!(
-        home([15.0, HOME_FULLBRIGHT_KEY_Y + 5.0]),
+        lighting([15.0, LIGHT_KEY_Y + 5.0]),
         Some("Click, press a key; Del clears it")
     );
     assert_eq!(
@@ -285,9 +311,14 @@ fn menu_key_capture_and_hover_help() {
         Some("Colours and size of mob hitboxes")
     );
     assert_eq!(
-        home([15.0, HOME_FULLBRIGHT_KEY_Y + 20.0]),
+        home([15.0, LIGHT_ON_Y + 5.0]).map(|tip| tip.contains("Colours")),
+        Some(true),
+        "the start page shows its own buttons, not a page's rows"
+    );
+    assert_eq!(
+        lighting([15.0, HOME_ZOOM_Y + 5.0]),
         None,
-        "page rows are hidden on the start page"
+        "the start page's buttons are hidden on a page"
     );
     let mob = MenuState {
         page: Page::Mob,
@@ -410,7 +441,11 @@ fn menu_key_capture_and_hover_help() {
     );
     // Every tip fits its box: the native font measured about 5 units per character.
     for control in controls() {
-        assert!(control.tip.len() as f32 * 5.4 <= TIP_WIDTH - 8.0, "{}", control.tip);
+        assert!(
+            control.tip.len() as f32 * 5.4 <= TIP_WIDTH - 8.0,
+            "{}",
+            control.tip
+        );
     }
 }
 
@@ -615,7 +650,7 @@ fn fixed_formats_like_json_numbers() {
         assert_eq!(out, text, "{value}");
     }
     let update = update(&Settings::default(), 0.0, MenuState::default());
-    assert!(update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}],"capture_key":false,"show_gameplay_hud":false,"control_values":[[0,255],[1,255],[2,255],[3,100],[4,3],[5,0],[6,false],[17,0.5],[18,0.5],[19,"#FFFFFF"],[21,false],[25,true],[42,true],[46,false],[50,true],[51,false],[59,true],[60,false],[61,true],[62,true]],"binding_changes":{"##), "{update}");
+    assert!(update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}],"capture_key":false,"show_gameplay_hud":false,"control_values":[[0,255],[1,255],[2,255],[3,100],[4,3],[5,0],[6,false],[17,0.5],[18,0.5],[19,"#FFFFFF"],[21,false],[25,true],[42,true],[46,false],[50,true],[51,false],[59,true],[60,false],[61,true],[62,true],[75,true],[76,true],[82,true]],"binding_changes":{"##), "{update}");
     assert!(update.ends_with("}}"));
 }
 
@@ -636,8 +671,8 @@ fn controls_line_up_with_their_routes() {
     assert!(!json.contains(&format!("mod.control:{}", LAST_CONTROL + 1)));
     // Controls are declared in index order: count them.
     assert_eq!(json.matches(r#""kind":"#).count(), LAST_CONTROL + 1);
-    let close =
-        tip_at([SETTINGS_W - 20.0, 12.0], MenuState::default(), false).map(|index| controls()[index].tip);
+    let close = tip_at([SETTINGS_W - 20.0, 12.0], MenuState::default(), false)
+        .map(|index| controls()[index].tip);
     assert_eq!(close, Some("Closes the menu (Esc does too)"));
 }
 
@@ -648,7 +683,10 @@ fn arrow_counter_page_and_moving() {
     assert!(press(&mut s, &mut m, "open_counter", 1.0));
     assert_eq!(m.page, Page::Counter);
     let shown = update(&s, 0.0, m);
-    assert!(shown.contains(r#""show_gameplay_hud":true"#), "the HUD stays visible: {shown}");
+    assert!(
+        shown.contains(r#""show_gameplay_hud":true"#),
+        "the HUD stays visible: {shown}"
+    );
     assert!(shown.contains(r##""#title_text":"Arrow counter""##));
     assert!(shown.contains(r##""#counter_page_visible":true"##));
     // The outline pages' widgets stay hidden here.
@@ -678,7 +716,10 @@ fn arrow_counter_page_and_moving() {
     assert!(moving.contains(r#""capture_key":true"#));
     assert!(moving.contains(r##""#card_visible":false"##));
     assert!(moving.contains(r##""#guide_top_visible":true,"#guide_bottom_visible":false"##));
-    let low = MenuState { guide_bottom: true, ..m };
+    let low = MenuState {
+        guide_bottom: true,
+        ..m
+    };
     assert_eq!(
         guide_update(low),
         r##"{"binding_changes":{"#guide_top_visible":false,"#guide_bottom_visible":true}}"##
@@ -687,16 +728,30 @@ fn arrow_counter_page_and_moving() {
     assert!(press(&mut s, &mut m, "counter_done", 1.0));
     assert!(!m.moving);
 
-    s.counter.pos = [0.1, 0.2];
+    s.counter.pos = crate::counter::Pos::fraction(0.1, 0.2);
     s.counter.scale = 2.0;
     assert!(confirmed(&mut s, &mut m, "counter_reset"));
-    assert_eq!(s.counter, crate::counter::Counter { on: true, bow_only: true, ..Default::default() });
+    assert_eq!(
+        s.counter,
+        crate::counter::Counter {
+            on: true,
+            bow_only: true,
+            ..Default::default()
+        }
+    );
 
     let tip = |point| tip_at(point, m, false).map(|index| controls()[index].tip);
-    assert_eq!(tip([15.0, COUNTER_MOVE_Y + 5.0]), Some("Drag it anywhere; scroll to resize"));
-    assert_eq!(tip([SETTINGS_W - 15.0, COUNTER_SIZE_Y + 5.0]), Some("10%% smaller or bigger"));
     assert_eq!(
-        tip_at([15.0, HOME_COUNTER_Y + 5.0], MenuState::default(), false).map(|index| controls()[index].tip),
+        tip([15.0, COUNTER_MOVE_Y + 5.0]),
+        Some("Move the HUD: drag, scroll to resize")
+    );
+    assert_eq!(
+        tip([SETTINGS_W - 15.0, COUNTER_SIZE_Y + 5.0]),
+        Some("10%% smaller or bigger")
+    );
+    assert_eq!(
+        tip_at([15.0, HOME_COUNTER_Y + 5.0], MenuState::default(), false)
+            .map(|index| controls()[index].tip),
         Some("Shows how many arrows you carry")
     );
     // Back goes to the start page.
@@ -705,12 +760,30 @@ fn arrow_counter_page_and_moving() {
 }
 
 #[test]
+fn the_fuel_line_shows_only_once_a_frame_was_measured() {
+    let mut state = MenuState::default();
+    assert_eq!(
+        fuel_update(state),
+        r##"{"binding_changes":{"#fuel_text":""}}"##
+    );
+    state.fuel_k = [41, 96];
+    assert_eq!(
+        fuel_update(state),
+        r##"{"binding_changes":{"#fuel_text":"Fuel per frame: 41k now, 96k busiest of 200k"}}"##
+    );
+    assert!(update(&Settings::default(), 0.0, state).contains("96k busiest of 200k"));
+}
+
+#[test]
 fn counter_settings_round_trip() {
     let s = Settings {
         counter: crate::counter::Counter {
             on: false,
             bow_only: true,
-            pos: [0.25, 0.75],
+            pos: crate::counter::Pos {
+                anchor: [crate::counter::Anchor::Centre, crate::counter::Anchor::End],
+                off: [93.5, -12.25],
+            },
             scale: 1.5,
         },
         ..Settings::default()
@@ -718,10 +791,15 @@ fn counter_settings_round_trip() {
     let back = Settings::parse(&s.to_json());
     assert_eq!(back.counter, s.counter);
     // Out-of-range values are clamped; older files keep the defaults.
-    let odd = Settings::parse(r#"{"arrow_counter_x": 3, "arrow_counter_y": -1, "arrow_counter_scale": 99}"#);
-    assert_eq!(odd.counter.pos, [1.0, 0.0]);
+    let odd = Settings::parse(
+        r#"{"arrow_counter_x": 3, "arrow_counter_y": -1, "arrow_counter_scale": 99}"#,
+    );
+    assert_eq!(odd.counter.pos, crate::counter::Pos::fraction(1.0, 0.0));
     assert_eq!(odd.counter.scale, crate::counter::MAX_SCALE);
-    assert_eq!(Settings::parse("{}").counter, crate::counter::Counter::default());
+    assert_eq!(
+        Settings::parse("{}").counter,
+        crate::counter::Counter::default()
+    );
     // Resetting an outline page keeps the counter.
     let mut reset = s;
     reset.reset();
@@ -729,12 +807,12 @@ fn counter_settings_round_trip() {
 }
 
 /// The host refuses a menu document over 192 KiB, which would stop the whole mod loading. Keep
-/// some room for the next page.
+/// some room: the colour wheel is most of it, so a new page costs about 1 KiB a control.
 #[test]
 fn menu_document_stays_within_the_host_limit() {
     let size = document().len();
     assert!(
-        size <= 180 * 1024,
+        size <= 172 * 1024,
         "the menu document is {size} bytes; the host's limit is {} and some room is kept",
         192 * 1024
     );
@@ -747,12 +825,21 @@ fn zoom_page_values_switches_and_key() {
     assert!(press(&mut s, &mut m, "open_zoom", 1.0));
     assert_eq!(m.page, Page::Zoom);
     let shown = update(&s, 0.0, m);
-    assert!(shown.contains(r##""#title_text":"Zoom""##) && shown.contains(r##""#zoom_page_visible":true"##));
+    assert!(
+        shown.contains(r##""#title_text":"Zoom""##)
+            && shown.contains(r##""#zoom_page_visible":true"##)
+    );
     for hidden in ["settings", "colour", "counter_page"] {
-        assert!(shown.contains(&format!(r##""#{hidden}_visible":false"##)), "{hidden}: {shown}");
+        assert!(
+            shown.contains(&format!(r##""#{hidden}_visible":false"##)),
+            "{hidden}: {shown}"
+        );
     }
     assert!(switch_on(&shown, "zoom"));
-    assert!(!switch_on(&shown, "zoom_mode"), "hold the key is the default");
+    assert!(
+        !switch_on(&shown, "zoom_mode"),
+        "hold the key is the default"
+    );
     assert!(shown.contains(r##""#zoom_key_text":"Z""##));
     assert!(shown.contains(r##""#zoom_level_text":"Zoom level: 4x""##));
     assert!(shown.contains(r##""#zoom_time_text":"Zoom time: 0.25s""##));
@@ -766,7 +853,10 @@ fn zoom_page_values_switches_and_key() {
         press(&mut s, &mut m, "zoom_level_more", 1.0);
     }
     assert_eq!(s.zoom.level, crate::zoom::MAX_LEVEL);
-    assert!(!press(&mut s, &mut m, "zoom_level_more", 1.0), "already at the top");
+    assert!(
+        !press(&mut s, &mut m, "zoom_level_more", 1.0),
+        "already at the top"
+    );
     assert!(press(&mut s, &mut m, "zoom_level", 1.0));
     assert_eq!(s.zoom.level, 4.0, "the value's own button resets it");
     for _ in 0..10 {
@@ -794,7 +884,13 @@ fn zoom_page_values_switches_and_key() {
     // Reset keeps the chosen key.
     s.zoom.key = KeyName::new("KeyC");
     assert!(confirmed(&mut s, &mut m, "zoom_reset"));
-    assert_eq!(s.zoom, crate::zoom::Zoom { key: KeyName::new("KeyC"), ..Default::default() });
+    assert_eq!(
+        s.zoom,
+        crate::zoom::Zoom {
+            key: KeyName::new("KeyC"),
+            ..Default::default()
+        }
+    );
     // An unbound key shows as not set, and the reset keeps it unbound.
     s.zoom.key = None;
     assert!(update(&s, 0.0, m).contains(r##""#zoom_key_text":"Click to set""##));
@@ -813,10 +909,17 @@ fn zoom_page_values_switches_and_key() {
 
     // Hover help, the start page's button, and the card fits the page.
     let tip = |point| tip_at(point, m, false).map(|index| controls()[index].tip);
-    assert_eq!(tip([15.0, ZOOM_MODE_Y + 5.0]), Some("Hold the key, or press to toggle"));
-    assert_eq!(tip([SETTINGS_W - 15.0, ZOOM_STEP_Y + 5.0]), Some("5%% smaller or bigger"));
     assert_eq!(
-        tip_at([15.0, HOME_ZOOM_Y + 5.0], MenuState::default(), false).map(|index| controls()[index].tip),
+        tip([15.0, ZOOM_MODE_Y + 5.0]),
+        Some("Hold the key, or press to toggle")
+    );
+    assert_eq!(
+        tip([SETTINGS_W - 15.0, ZOOM_STEP_Y + 5.0]),
+        Some("5%% smaller or bigger")
+    );
+    assert_eq!(
+        tip_at([15.0, HOME_ZOOM_Y + 5.0], MenuState::default(), false)
+            .map(|index| controls()[index].tip),
         Some("Hold a key to zoom in smoothly")
     );
     assert!(card_height(m) <= CARD_H && card_height(MenuState::default()) <= CARD_H);
@@ -846,35 +949,94 @@ fn dump_snapshots() {
         page: Page::Zoom,
         ..MenuState::default()
     };
-    let asking = MenuState { confirm: Reset::Page, ..on(false) };
-    let capture = MenuState { capturing_zoom: true, ..zoom };
-    let home_capture = MenuState { capturing: true, ..MenuState::default() };
-    let mob = MenuState { page: Page::Mob, ..MenuState::default() };
-    let stop = |action: Action| controls().iter().position(|c| c.action == action).map(|i| i as u8);
-    let focus_slider = MenuState { focus: stop(Action::Slider(3)), ..on(false) };
-    let focus_switch = MenuState { focus: stop(Action::Toggle("rainbow")), ..on(false) };
-    for (name, state) in [("home", MenuState::default()), ("counter", counter), ("moving", moving), ("block", on(false)), ("colour", on(true)), ("zoom", zoom), ("asking", asking), ("capture", capture), ("home_capture", home_capture), ("mob", mob), ("focus_slider", focus_slider), ("focus_switch", focus_switch)] {
+    let asking = MenuState {
+        confirm: Reset::Page,
+        ..on(false)
+    };
+    let capture = MenuState {
+        capturing_zoom: true,
+        ..zoom
+    };
+    let home_capture = MenuState {
+        capturing: true,
+        ..MenuState::default()
+    };
+    let mob = MenuState {
+        page: Page::Mob,
+        ..MenuState::default()
+    };
+    let stop = |action: Action| {
+        controls()
+            .iter()
+            .position(|c| c.action == action)
+            .map(|i| i as u8)
+    };
+    let focus_slider = MenuState {
+        focus: stop(Action::Slider(3)),
+        ..on(false)
+    };
+    let focus_switch = MenuState {
+        focus: stop(Action::Toggle("rainbow")),
+        ..on(false)
+    };
+    for (name, state) in [
+        ("home", MenuState::default()),
+        ("counter", counter),
+        ("moving", moving),
+        ("block", on(false)),
+        ("colour", on(true)),
+        ("zoom", zoom),
+        ("asking", asking),
+        ("capture", capture),
+        ("home_capture", home_capture),
+        ("mob", mob),
+        ("focus_slider", focus_slider),
+        ("focus_switch", focus_switch),
+    ] {
         std::fs::write(format!("{dir}/{name}.json"), content_in(&s, 0.0, state)).unwrap();
     }
     // A page with changed values, which say `reset` on their right.
     let mut changed = s;
     changed.zoom.level = 6.0;
     changed.counter.scale = 1.4;
-    std::fs::write(format!("{dir}/zoom_changed.json"), content_in(&changed, 0.0, zoom)).unwrap();
-    std::fs::write(format!("{dir}/counter_surface.json"), crate::counter::surface()).unwrap();
-    for (name, arrows, scale, moving) in [("counter_hud", 64, 1.0, false), ("counter_big", 0, 3.0, true)] {
+    std::fs::write(
+        format!("{dir}/zoom_changed.json"),
+        content_in(&changed, 0.0, zoom),
+    )
+    .unwrap();
+    std::fs::write(
+        format!("{dir}/counter_surface.json"),
+        crate::counter::surface(),
+    )
+    .unwrap();
+    for (name, arrows, scale, moving) in [
+        ("counter_hud", 64, 1.0, false),
+        ("counter_big", 0, 3.0, true),
+    ] {
         let width = crate::counter::guess_width(crate::counter::digits(arrows));
         let size = crate::counter::size(scale, width);
         let view = crate::counter::View {
             visible: true,
             arrows: Some(arrows),
-            offset: crate::counter::place([0.5, 0.4], size, [426.0, 240.0]),
+            offset: crate::counter::place(
+                crate::counter::Pos::fraction(0.5, 0.4),
+                size,
+                [426.0, 240.0],
+            ),
             size,
             scale,
             text_width: width,
-            edit: moving.then_some(crate::counter::Edit { hover: Some(crate::counter::Part::Handle(3)), guides: [Some(213.0), Some(218.0)], ..Default::default() }),
+            edit: moving.then_some(crate::counter::Edit {
+                hover: Some(crate::counter::Part::Handle(3)),
+                guides: [Some(213.0), Some(218.0)],
+                ..Default::default()
+            }),
         };
-        std::fs::write(format!("{dir}/{name}.patch.json"), crate::counter::patch(&view)).unwrap();
+        std::fs::write(
+            format!("{dir}/{name}.patch.json"),
+            crate::counter::patch(&view),
+        )
+        .unwrap();
     }
 }
 
@@ -891,7 +1053,10 @@ fn resets_ask_before_they_change_anything() {
     assert_eq!(m.confirm, Reset::Page);
     let asking = update(&s, 0.0, m);
     assert!(asking.contains(r##""#reset_text":"Sure? Click again""##));
-    assert!(asking.contains(r##""#reset_bg":[0.62,0.2,0.18,1]"##), "{asking}");
+    assert!(
+        asking.contains(r##""#reset_bg":[0.62,0.2,0.18,1]"##),
+        "{asking}"
+    );
     // Clicking anything else in between cancels the question and still redraws the button.
     assert!(press(&mut s, &mut m, "rainbow", 1.0));
     assert_eq!(m.confirm, Reset::None);
@@ -916,9 +1081,15 @@ fn resets_ask_before_they_change_anything() {
 #[test]
 fn key_buttons_say_how_to_cancel() {
     let s = Settings::default();
-    let zoom = MenuState { capturing_zoom: true, ..MenuState::default() };
+    let zoom = MenuState {
+        capturing_zoom: true,
+        ..MenuState::default()
+    };
     assert!(update(&s, 0.0, zoom).contains("Esc cancels, Del clears"));
-    let menu = MenuState { capturing: true, ..MenuState::default() };
+    let menu = MenuState {
+        capturing: true,
+        ..MenuState::default()
+    };
     assert!(update(&s, 0.0, menu).contains("Press key, Esc cancels"));
 }
 
@@ -980,24 +1151,42 @@ fn the_controls_table_matches_the_document_exactly() {
         }
         let inside = |area: [f32; 4]| buttons.iter().any(|&button| contains(area, button));
         let exact = |area: [f32; 4]| {
-            buttons.iter().any(|b| (0..4).all(|i| (b[i] - area[i]).abs() < 0.01))
+            buttons
+                .iter()
+                .any(|b| (0..4).all(|i| (b[i] - area[i]).abs() < 0.01))
         };
         let (plain, lifted) = (control.area, shifted(control.area));
         match &control.action {
             Action::Press(_) | Action::Key(_) | Action::Toggle(_) | Action::Hex => {
                 // Key rows hold a label and a button; the others are exactly their button.
                 let key_row = matches!(control.action, Action::Key(_));
-                let ok = if key_row { inside(plain) || inside(lifted) } else { exact(plain) || exact(lifted) };
-                assert!(ok, "the control \"{}\" at {:?} is not a button", control.tip, control.area);
+                let ok = if key_row {
+                    inside(plain) || inside(lifted)
+                } else {
+                    exact(plain) || exact(lifted)
+                };
+                assert!(
+                    ok,
+                    "the control \"{}\" at {:?} is not a button",
+                    control.tip, control.area
+                );
             }
             Action::Slider(_) | Action::Stepper { .. } => {
-                assert!(inside(plain) || inside(lifted), "no button in the row at {x},{y},{w},{h}");
+                assert!(
+                    inside(plain) || inside(lifted),
+                    "no button in the row at {x},{y},{w},{h}"
+                );
             }
             Action::Help => {
                 assert!(
-                    inside(plain) || inside(lifted) || exact(plain) || control.tip.contains("click")
-                        || control.tip.contains("less or more") || control.tip.contains("smaller or bigger")
-                        || control.tip.contains("weaker or stronger") || control.tip.contains("Click, type")
+                    inside(plain)
+                        || inside(lifted)
+                        || exact(plain)
+                        || control.tip.contains("click")
+                        || control.tip.contains("less or more")
+                        || control.tip.contains("smaller or bigger")
+                        || control.tip.contains("weaker or stronger")
+                        || control.tip.contains("Click, type")
                         || control.tip.contains("Angle picks"),
                     "the help \"{}\" at {x},{y} has nothing to point at",
                     control.tip
@@ -1015,19 +1204,36 @@ fn the_controls_table_matches_the_document_exactly() {
 #[test]
 fn texts_fit_where_they_are_shown() {
     let fits = |text: &str, width: f32| text.len() as f32 * 5.0 + 6.0 <= width;
-    assert!(!fits("It snaps to the hotbar and screen middle", 200.0), "the check must catch it");
+    assert!(
+        !fits("It snaps to the hotbar and screen middle", 200.0),
+        "the check must catch it"
+    );
     for line in GUIDE_LINES {
-        assert!(fits(line, GUIDE_W - GUIDE_TEXT_X - 10.0), "guide line too long: {line}");
+        assert!(
+            fits(line, GUIDE_W - GUIDE_TEXT_X - 10.0),
+            "guide line too long: {line}"
+        );
     }
     for control in controls() {
         // `%%` shows as one `%`.
-        assert!(fits(&control.tip.replace("%%", "%"), TIP_WIDTH - 8.0), "tip too long: {}", control.tip);
-        assert!(fits(&control.tip.replace("%%", "%"), SETTINGS_W - 20.0), "hint too long: {}", control.tip);
+        assert!(
+            fits(&control.tip.replace("%%", "%"), TIP_WIDTH - 8.0),
+            "tip too long: {}",
+            control.tip
+        );
+        assert!(
+            fits(&control.tip.replace("%%", "%"), SETTINGS_W - 20.0),
+            "hint too long: {}",
+            control.tip
+        );
     }
     assert!(fits(HINT_DEFAULT, SETTINGS_W - 20.0));
     // What the start page buttons say, beside the badge and before the arrow.
     for about in HOME_ABOUT {
-        assert!(fits(about, SETTINGS_W - 70.0), "home description too long: {about}");
+        assert!(
+            fits(about, SETTINGS_W - 70.0),
+            "home description too long: {about}"
+        );
     }
     // The key buttons while they wait, in the narrowest button that shows them.
     for text in [CAPTURE_MENU, CAPTURE_OPTIONAL] {
@@ -1037,14 +1243,36 @@ fn texts_fit_where_they_are_shown() {
     assert!(fits("Sure? Click again", HALF - 10.0));
     // The title, the longest trail in the room left of Back.
     for state in [
-        MenuState { page: Page::Block, colour_open: true, editing_fill: true, ..MenuState::default() },
-        MenuState { page: Page::Mob, colour_open: true, editing_aim: true, ..MenuState::default() },
-        MenuState { page: Page::Counter, ..MenuState::default() },
+        MenuState {
+            page: Page::Block,
+            colour_open: true,
+            editing_fill: true,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Mob,
+            colour_open: true,
+            editing_aim: true,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Counter,
+            ..MenuState::default()
+        },
     ] {
         let patch = update(&Settings::default(), 0.0, state);
-        let title = patch.split(r##""#title_text":""##).nth(1).unwrap().split('"').next().unwrap();
+        let title = patch
+            .split(r##""#title_text":""##)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
         // The title is drawn larger.
-        assert!(title.len() as f32 * 5.0 * TITLE_SCALE + 6.0 <= BACK_AREA[0] - 14.0 - TITLE_X, "title too long: {title}");
+        assert!(
+            title.len() as f32 * 5.0 * TITLE_SCALE + 6.0 <= BACK_AREA[0] - 14.0 - TITLE_X,
+            "title too long: {title}"
+        );
     }
 }
 
@@ -1089,7 +1317,7 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
     let first = keyed(&s, &mut m, &["Tab"]);
     assert!(first.moved && first.events.is_empty());
     assert_eq!(enter(&s, &mut m), vec![("open_block".to_owned(), 1.0)]);
-    // Down visits the page buttons, then fullbright, its key and the menu key; Up goes back.
+    // Down visits the page buttons, then the menu key; Up goes back.
     let mut seen = Vec::new();
     for _ in 0..7 {
         keyed(&s, &mut m, &["ArrowDown"]);
@@ -1097,7 +1325,15 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
     }
     assert_eq!(
         seen,
-        ["open_mob", "open_counter", "open_zoom", "fullbright", "fullbright_key", "menu_key", "close"]
+        [
+            "open_mob",
+            "open_counter",
+            "open_cps",
+            "open_zoom",
+            "open_light",
+            "menu_key",
+            "close"
+        ]
     );
     // Past the last stop it wraps to the first, and Up from the first goes to the last.
     keyed(&s, &mut m, &["ArrowDown"]);
@@ -1106,22 +1342,32 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
     assert_eq!(enter(&s, &mut m)[0].0, "close");
     // Shift-less Tab also goes forward, and the focus ring and bottom line follow it.
     let patch = focus_update(m, false);
-    assert!(patch.contains(r##""#focus_visible":true"##) && patch.contains("Closes the menu"), "{patch}");
+    assert!(
+        patch.contains(r##""#focus_visible":true"##) && patch.contains("Closes the menu"),
+        "{patch}"
+    );
 }
 
 #[test]
 fn enter_and_arrows_change_the_focused_control() {
     let mut s = Settings::default();
-    let mut m = MenuState::default();
     // Fullbright is a switch: Enter flips it, Left and Right set it off and on.
-    for _ in 0..5 {
-        keyed(&s, &mut m, &["Tab"]);
-    }
+    let mut m = MenuState {
+        page: Page::Lighting,
+        ..MenuState::default()
+    };
+    keyed(&s, &mut m, &["Tab"]);
     assert_eq!(enter(&s, &mut m), vec![("fullbright".to_owned(), 1.0)]);
     s.fullbright = true;
     assert_eq!(enter(&s, &mut m), vec![("fullbright".to_owned(), 0.0)]);
-    assert_eq!(keyed(&s, &mut m, &["ArrowLeft"]).events, vec![("fullbright".to_owned(), 0.0)]);
-    assert_eq!(keyed(&s, &mut m, &["ArrowRight"]).events, vec![("fullbright".to_owned(), 1.0)]);
+    assert_eq!(
+        keyed(&s, &mut m, &["ArrowLeft"]).events,
+        vec![("fullbright".to_owned(), 0.0)]
+    );
+    assert_eq!(
+        keyed(&s, &mut m, &["ArrowRight"]).events,
+        vec![("fullbright".to_owned(), 1.0)]
+    );
 
     // Open the Block page with the keyboard: focus lands on its first control.
     let mut m = MenuState::default();
@@ -1144,7 +1390,10 @@ fn enter_and_arrows_change_the_focused_control() {
     assert!(apply(&mut s, &mut m, &right[0].0, right[0].1));
     assert_eq!(s.rgba[3], 140); // 55%
     let left = keyed(&s, &mut m, &["ArrowLeft", "ArrowLeft"]).events;
-    assert_eq!(left.iter().map(|event| event.1).collect::<Vec<_>>(), vec![50.0, 50.0]);
+    assert_eq!(
+        left.iter().map(|event| event.1).collect::<Vec<_>>(),
+        vec![50.0, 50.0]
+    );
     assert_eq!(enter(&s, &mut m), vec![("type_opacity".to_owned(), 1.0)]);
 }
 
@@ -1155,25 +1404,43 @@ fn keys_do_nothing_while_typing_or_waiting_and_a_click_is_not_needed_to_leave() 
     keyed(&s, &mut m, &["Tab"]);
     let focus = m.focus;
     for blocked in [
-        MenuState { typing: Some(Typing::new(0)), ..m },
-        MenuState { capturing: true, ..m },
-        MenuState { capturing_zoom: true, ..m },
+        MenuState {
+            typing: Some(Typing::new(0)),
+            ..m
+        },
+        MenuState {
+            capturing: true,
+            ..m
+        },
+        MenuState {
+            capturing_zoom: true,
+            ..m
+        },
         MenuState { moving: true, ..m },
     ] {
         let mut blocked = blocked;
-        assert_eq!(keyed(&s, &mut blocked, &["Tab", "Enter", "ArrowDown"]), Keyed::default());
+        assert_eq!(
+            keyed(&s, &mut blocked, &["Tab", "Enter", "ArrowDown"]),
+            Keyed::default()
+        );
         assert_eq!(blocked.focus, focus);
     }
     // Backspace goes back a page, but does nothing on the start page.
     assert!(keyed(&s, &mut m, &["Backspace"]).events.is_empty());
     m.page = Page::Zoom;
-    assert_eq!(keyed(&s, &mut m, &["Backspace"]).events, vec![("back".to_owned(), 1.0)]);
+    assert_eq!(
+        keyed(&s, &mut m, &["Backspace"]).events,
+        vec![("back".to_owned(), 1.0)]
+    );
 }
 
 #[test]
 fn moving_the_focus_cancels_a_waiting_reset_and_pages_refocus() {
     let mut s = Settings::default();
-    let mut m = MenuState { page: Page::Zoom, ..MenuState::default() };
+    let mut m = MenuState {
+        page: Page::Zoom,
+        ..MenuState::default()
+    };
     // Walk to Reset zoom and press it: it asks.
     let mut guard = 0;
     keyed(&s, &mut m, &["Tab"]);
@@ -1190,7 +1457,11 @@ fn moving_the_focus_cancels_a_waiting_reset_and_pages_refocus() {
     assert!(moved.moved && moved.redraw);
     assert_eq!(m.confirm, Reset::None);
     // Leaving the page moves a hidden focus to the new page's first stop.
-    let mut m = MenuState { page: Page::Zoom, focus: Some(0), ..MenuState::default() };
+    let mut m = MenuState {
+        page: Page::Zoom,
+        focus: Some(0),
+        ..MenuState::default()
+    };
     settle_focus(&s, &mut m);
     let first = controls()[usize::from(m.focus.unwrap())].action.clone();
     assert!(matches!(first, Action::Toggle("zoom")), "{first:?}");
@@ -1203,11 +1474,29 @@ fn every_page_has_stops_and_every_stop_does_something() {
         MenuState::default(),
         on(false),
         on(true),
-        MenuState { page: Page::Block, colour_open: true, editing_fill: true, ..MenuState::default() },
-        MenuState { page: Page::Mob, ..MenuState::default() },
-        MenuState { page: Page::Mob, colour_open: true, ..MenuState::default() },
-        MenuState { page: Page::Counter, ..MenuState::default() },
-        MenuState { page: Page::Zoom, ..MenuState::default() },
+        MenuState {
+            page: Page::Block,
+            colour_open: true,
+            editing_fill: true,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Mob,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Mob,
+            colour_open: true,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Counter,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Zoom,
+            ..MenuState::default()
+        },
     ];
     for state in pages {
         let matching = fill_matches(&s, state);
@@ -1226,7 +1515,12 @@ fn every_page_has_stops_and_every_stop_does_something() {
             let focus = walker.focus.unwrap();
             assert!(visited.insert(focus), "stop {focus} visited twice");
             let events = enter(&s, &mut walker);
-            assert_eq!(events.len(), 1, "Enter on {:?} sent {events:?}", controls()[usize::from(focus)].tip);
+            assert_eq!(
+                events.len(),
+                1,
+                "Enter on {:?} sent {events:?}",
+                controls()[usize::from(focus)].tip
+            );
         }
         // One more Tab is back at the first.
         keyed(&s, &mut walker, &["Tab"]);
@@ -1240,18 +1534,31 @@ fn every_page_has_stops_and_every_stop_does_something() {
 #[test]
 fn menu_document_stays_within_the_node_limit() {
     let document = document();
-    let nodes = document.matches(r#""type":"#).count() + document.matches("@block_outline.cell").count();
-    assert!(nodes <= 3000, "the menu document has about {nodes} nodes; the host's limit is 4096");
+    let nodes =
+        document.matches(r#""type":"#).count() + document.matches("@block_outline.cell").count();
+    assert!(
+        nodes <= 3000,
+        "the menu document has about {nodes} nodes; the host's limit is 4096"
+    );
     assert!(nodes > 500, "the count looks wrong: {nodes}");
 }
 
 /// WCAG relative luminance and contrast ratio of two sRGB colours.
 fn contrast(a: [f32; 3], b: [f32; 3]) -> f32 {
     let luminance = |c: [f32; 3]| {
-        let lin = |v: f32| if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        let lin = |v: f32| {
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
         0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
     };
-    let (hi, lo) = (luminance(a).max(luminance(b)), luminance(a).min(luminance(b)));
+    let (hi, lo) = (
+        luminance(a).max(luminance(b)),
+        luminance(a).min(luminance(b)),
+    );
     (hi + 0.05) / (lo + 0.05)
 }
 
@@ -1305,18 +1612,34 @@ fn up_and_down_follow_the_columns_and_left_and_right_the_rows() {
     focus_on(&s, &mut m, &Action::Toggle("rainbow"));
     // Down from the left column stays in the left column, Down from the right in the right.
     keyed(&s, &mut m, &["ArrowDown"]);
-    assert_eq!(controls()[usize::from(m.focus.unwrap())].action, Action::Toggle("fill_match"));
+    assert_eq!(
+        controls()[usize::from(m.focus.unwrap())].action,
+        Action::Toggle("fill_match")
+    );
     keyed(&s, &mut m, &["ArrowUp"]);
     keyed(&s, &mut m, &["ArrowRight"]);
-    assert_eq!(controls()[usize::from(m.focus.unwrap())].action, Action::Toggle("pulse"));
+    assert_eq!(
+        controls()[usize::from(m.focus.unwrap())].action,
+        Action::Toggle("pulse")
+    );
     keyed(&s, &mut m, &["ArrowDown"]);
-    assert_eq!(controls()[usize::from(m.focus.unwrap())].action, Action::Press("reset".into()));
+    assert_eq!(
+        controls()[usize::from(m.focus.unwrap())].action,
+        Action::Press("reset".into())
+    );
     // Left on the right-hand button goes to its neighbour; Left at the row's start goes nowhere.
     keyed(&s, &mut m, &["ArrowLeft"]);
-    assert_eq!(controls()[usize::from(m.focus.unwrap())].action, Action::Toggle("fill_match"));
+    assert_eq!(
+        controls()[usize::from(m.focus.unwrap())].action,
+        Action::Toggle("fill_match")
+    );
     let there = m.focus;
     let sent = keyed(&s, &mut m, &["ArrowLeft"]);
-    assert_eq!((m.focus, sent.events.is_empty()), (there, true), "nothing is left of it");
+    assert_eq!(
+        (m.focus, sent.events.is_empty()),
+        (there, true),
+        "nothing is left of it"
+    );
     // Up from the first row reaches the colour buttons at the top, and Back beside them.
     for _ in 0..8 {
         keyed(&s, &mut m, &["ArrowUp"]);
@@ -1332,20 +1655,52 @@ fn left_and_right_change_sliders_and_values_but_move_between_neighbours() {
     // On a slider they change it; they never leave it.
     focus_on(&s, &mut m, &Action::Slider(3));
     let at = m.focus;
-    assert_eq!(keyed(&s, &mut m, &["ArrowRight"]).events, vec![("opacity".to_owned(), 55.0)]);
+    assert_eq!(
+        keyed(&s, &mut m, &["ArrowRight"]).events,
+        vec![("opacity".to_owned(), 55.0)]
+    );
     assert_eq!(m.focus, at);
     // Shift makes the step five times as big.
-    assert_eq!(keyed_shift(&s, &mut m, &["ArrowRight"]).events, vec![("opacity".to_owned(), 75.0)]);
-    assert_eq!(keyed_shift(&s, &mut m, &["ArrowLeft"]).events, vec![("opacity".to_owned(), 25.0)]);
+    assert_eq!(
+        keyed_shift(&s, &mut m, &["ArrowRight"]).events,
+        vec![("opacity".to_owned(), 75.0)]
+    );
+    assert_eq!(
+        keyed_shift(&s, &mut m, &["ArrowLeft"]).events,
+        vec![("opacity".to_owned(), 25.0)]
+    );
     // On a full-width switch with nothing beside it they turn it off and on.
-    let mut z = MenuState { page: Page::Zoom, ..MenuState::default() };
+    let mut z = MenuState {
+        page: Page::Zoom,
+        ..MenuState::default()
+    };
     focus_on(&s, &mut z, &Action::Toggle("zoom"));
-    assert_eq!(keyed(&s, &mut z, &["ArrowLeft"]).events, vec![("zoom".to_owned(), 0.0)]);
-    assert_eq!(keyed(&s, &mut z, &["ArrowRight"]).events, vec![("zoom".to_owned(), 1.0)]);
+    assert_eq!(
+        keyed(&s, &mut z, &["ArrowLeft"]).events,
+        vec![("zoom".to_owned(), 0.0)]
+    );
+    assert_eq!(
+        keyed(&s, &mut z, &["ArrowRight"]).events,
+        vec![("zoom".to_owned(), 1.0)]
+    );
     // On a value with - and + they press those.
-    focus_on(&s, &mut z, &Action::Stepper { value: "zoom_level", less: "zoom_level_less", more: "zoom_level_more" });
-    assert_eq!(keyed(&s, &mut z, &["ArrowLeft"]).events, vec![("zoom_level_less".to_owned(), 1.0)]);
-    assert_eq!(keyed(&s, &mut z, &["ArrowRight"]).events, vec![("zoom_level_more".to_owned(), 1.0)]);
+    focus_on(
+        &s,
+        &mut z,
+        &Action::Stepper {
+            value: "zoom_level",
+            less: "zoom_level_less",
+            more: "zoom_level_more",
+        },
+    );
+    assert_eq!(
+        keyed(&s, &mut z, &["ArrowLeft"]).events,
+        vec![("zoom_level_less".to_owned(), 1.0)]
+    );
+    assert_eq!(
+        keyed(&s, &mut z, &["ArrowRight"]).events,
+        vec![("zoom_level_more".to_owned(), 1.0)]
+    );
     // On a half-width switch they move to the one beside it instead of changing it.
     let mut b = on(false);
     focus_on(&s, &mut b, &Action::Toggle("rainbow"));
@@ -1368,9 +1723,13 @@ fn rows_of_colours_are_walked_with_left_and_right() {
     assert_eq!(names, ["swatch_black", "swatch_red", "swatch_orange"]);
     // Down from a swatch lands on a saved colour below it, Up comes back.
     keyed(&s, &mut m, &["ArrowDown"]);
-    assert!(matches!(&controls()[usize::from(m.focus.unwrap())].action, Action::Press(id) if id.starts_with("favourite_") || id == "save_favourite"));
+    assert!(
+        matches!(&controls()[usize::from(m.focus.unwrap())].action, Action::Press(id) if id.starts_with("favourite_") || id == "save_favourite")
+    );
     keyed(&s, &mut m, &["ArrowUp"]);
-    assert!(matches!(&controls()[usize::from(m.focus.unwrap())].action, Action::Press(id) if id.starts_with("swatch_")));
+    assert!(
+        matches!(&controls()[usize::from(m.focus.unwrap())].action, Action::Press(id) if id.starts_with("swatch_"))
+    );
 }
 
 #[test]
@@ -1382,13 +1741,21 @@ fn shift_tab_goes_backwards_and_the_first_arrow_only_brings_the_frame_in() {
     keyed_shift(&s, &mut m, &["Tab"]);
     assert_ne!(focused(&m), second);
     keyed_shift(&s, &mut m, &["Tab"]);
-    assert_eq!(focused(&m), "Closes the menu (Esc does too)", "back past the first wraps to the last");
+    assert_eq!(
+        focused(&m),
+        "Closes the menu (Esc does too)",
+        "back past the first wraps to the last"
+    );
     // Any arrow on a fresh menu focuses the first control without pressing anything.
     for arrow in ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"] {
         let mut fresh = MenuState::default();
         let sent = keyed(&s, &mut fresh, &[arrow]);
         assert!(sent.events.is_empty() && fresh.focus.is_some(), "{arrow}");
-        assert_eq!(focused(&fresh), "Colours and size of the block outline", "{arrow}");
+        assert_eq!(
+            focused(&fresh),
+            "Colours and size of the block outline",
+            "{arrow}"
+        );
     }
 }
 
@@ -1399,9 +1766,18 @@ fn every_page_can_be_walked_with_arrows_and_reaches_every_stop() {
         MenuState::default(),
         on(false),
         on(true),
-        MenuState { page: Page::Mob, ..MenuState::default() },
-        MenuState { page: Page::Counter, ..MenuState::default() },
-        MenuState { page: Page::Zoom, ..MenuState::default() },
+        MenuState {
+            page: Page::Mob,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Counter,
+            ..MenuState::default()
+        },
+        MenuState {
+            page: Page::Zoom,
+            ..MenuState::default()
+        },
     ] {
         let matching = fill_matches(&s, state);
         let stops: std::collections::HashSet<u8> = (0..controls().len())
@@ -1415,7 +1791,10 @@ fn every_page_can_be_walked_with_arrows_and_reaches_every_stop() {
         // stranded where the arrows cannot get to it.
         let mut reached = std::collections::HashSet::new();
         for start in &stops {
-            let mut m = MenuState { focus: Some(*start), ..state };
+            let mut m = MenuState {
+                focus: Some(*start),
+                ..state
+            };
             reached.insert(*start);
             for arrow in ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"] {
                 let mut at = m;
@@ -1424,7 +1803,11 @@ fn every_page_can_be_walked_with_arrows_and_reaches_every_stop() {
             }
             let _ = &mut m;
         }
-        assert_eq!(reached, stops, "page {:?}: some stop cannot be reached by arrows", state.page);
+        assert_eq!(
+            reached, stops,
+            "page {:?}: some stop cannot be reached by arrows",
+            state.page
+        );
     }
 }
 
@@ -1434,12 +1817,18 @@ fn changed_values_offer_a_reset() {
     let mut s = Settings::default();
     let plain = update(&s, 0.0, MenuState::default());
     for name in ["zoom_level", "zoom_time", "zoom_step", "counter_size"] {
-        assert!(plain.contains(&format!(r##""#{name}_reset":"","##)), "{name} is at its default");
+        assert!(
+            plain.contains(&format!(r##""#{name}_reset":"","##)),
+            "{name} is at its default"
+        );
     }
     s.zoom.level = 6.0;
     s.counter.scale = 1.4;
     let changed = update(&s, 0.0, MenuState::default());
     assert!(changed.contains(r##""#zoom_level_reset":"reset""##));
     assert!(changed.contains(r##""#counter_size_reset":"reset""##));
-    assert!(changed.contains(r##""#zoom_time_reset":"","##), "the others are still at their defaults");
+    assert!(
+        changed.contains(r##""#zoom_time_reset":"","##),
+        "the others are still at their defaults"
+    );
 }

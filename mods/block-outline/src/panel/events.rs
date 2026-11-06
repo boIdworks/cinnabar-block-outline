@@ -15,6 +15,7 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
     let asked = match id {
         "reset" => Reset::Page,
         "counter_reset" if !state.moving => Reset::Counter,
+        "cps_reset" if !state.moving => Reset::Cps,
         "zoom_reset" => Reset::Zoom,
         _ => Reset::None,
     };
@@ -32,7 +33,7 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
 
 fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     match id {
-        "open_block" | "open_mob" | "open_counter" | "open_zoom" => {
+        "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_zoom" | "open_light" => {
             if state.page != Page::Home {
                 return false;
             }
@@ -40,6 +41,8 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
                 "open_block" => Page::Block,
                 "open_mob" => Page::Mob,
                 "open_zoom" => Page::Zoom,
+                "open_cps" => Page::Cps,
+                "open_light" => Page::Lighting,
                 _ => Page::Counter,
             };
             state.colour_open = false;
@@ -65,6 +68,7 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
         // real settings: committing from inside a page's edit would be overwritten by it.
         _ if id.starts_with("type_") => commit_typing(settings, state),
         _ if id.starts_with("counter") => return apply_counter(settings, state, id, value),
+        _ if id.starts_with("cps") => return apply_cps(settings, state, id, value),
         _ if id.starts_with("zoom") => return apply_zoom(settings, id, value),
         _ => {}
     }
@@ -89,14 +93,46 @@ fn apply_counter(settings: &mut Settings, state: &mut MenuState, id: &str, value
             // Something to drag: moving shows the counter even while it is off.
             counter.on = true;
             state.moving = true;
+            state.moving_cps = false;
         }
         "counter_done" => state.moving = false,
         "counter_size" => counter.scale = 1.0,
         "counter_smaller" => counter.scale = Counter::stepped(counter.scale, -1.0),
         "counter_bigger" => counter.scale = Counter::stepped(counter.scale, 1.0),
+        "counter_reset" if state.moving_cps => {
+            // The Reset in the moving guide resets whatever is being moved.
+            settings.cps.pos = crate::cps::DEFAULT_POS;
+            settings.cps.scale = 1.0;
+        }
         "counter_reset" => {
             counter.pos = DEFAULT_POS;
             counter.scale = 1.0;
+        }
+        _ => return false,
+    }
+    (*settings, *state) != before
+}
+
+/// [`apply`] for the CPS page: switches, moving, the size and reset.
+fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
+    use crate::cps::{Cps, DEFAULT_POS};
+    let before = (*settings, *state);
+    let cps = &mut settings.cps;
+    match id {
+        "cps_on" => cps.on = value > 0.5,
+        "cps_right" => cps.right = value > 0.5,
+        "cps_move" => {
+            // Something to drag: moving shows the readout even while it is off.
+            cps.on = true;
+            state.moving = true;
+            state.moving_cps = true;
+        }
+        "cps_size" => cps.scale = 1.0,
+        "cps_size_less" => cps.scale = Cps::stepped(cps.scale, -1.0),
+        "cps_size_more" => cps.scale = Cps::stepped(cps.scale, 1.0),
+        "cps_reset" => {
+            cps.pos = DEFAULT_POS;
+            cps.scale = 1.0;
         }
         _ => return false,
     }
@@ -128,7 +164,12 @@ fn apply_zoom(settings: &mut Settings, id: &str, value: f32) -> bool {
             z.step = zoom::clamp_step(f32::from(z.step) + f32::from(zoom::STEP_STEP));
         }
         // Everything but the key the player chose.
-        "zoom_reset" => *z = Zoom { key: z.key, ..defaults },
+        "zoom_reset" => {
+            *z = Zoom {
+                key: z.key,
+                ..defaults
+            }
+        }
         _ => return false,
     }
     *settings != before

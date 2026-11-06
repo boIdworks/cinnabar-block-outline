@@ -18,13 +18,13 @@ mod layout;
 mod tests;
 
 use bindings::{bindings, bindings_into};
-pub use events::{apply, apply_text, commit_typing, type_key};
 pub use controls::{Keyed, keys, tip_at};
 use controls::{focus_area, settle_focus, tip_area};
+pub use events::{apply, apply_text, commit_typing, type_key};
 use help::focus_bindings;
 pub use help::{card_point, focus_update, highlight_update, tip_update};
-pub(crate) use json::{digits, fixed, json_string};
 use json::vector;
+pub(crate) use json::{digits, fixed, json_string};
 use layout::document;
 
 /// Menu state that is not saved: whether the "Menu key" button is waiting for a key, and
@@ -51,10 +51,16 @@ pub struct MenuState {
     /// The control the keyboard is on (an index into `controls()`), once Tab or an arrow key
     /// was pressed; a click on the menu clears it.
     pub focus: Option<u8>,
-    /// The arrow counter is being dragged and resized: the card hides and a short guide shows.
+    /// The HUD (the arrow counter and the CPS readout) is being dragged and resized: the card hides and a short guide shows.
     pub moving: bool,
+    /// Which element the keys and Reset act on while moving: the CPS readout (true) or the
+    /// arrow counter (false), whichever was grabbed last.
+    pub moving_cps: bool,
     /// The moving guide sits at the bottom of the screen, because the counter is near the top.
     pub guide_bottom: bool,
+    /// Fuel the last frame used and the busiest frame used, in thousands (of 200): shown at the
+    /// foot of the start page.
+    pub fuel_k: [u16; 2],
 }
 
 /// The reset buttons, which ask for a second click before they change anything.
@@ -65,6 +71,7 @@ pub enum Reset {
     /// The Block outline or Mob hitbox page's Reset.
     Page,
     Counter,
+    Cps,
     Zoom,
 }
 
@@ -80,7 +87,9 @@ pub enum Page {
     Block,
     Mob,
     Counter,
+    Cps,
     Zoom,
+    Lighting,
 }
 
 impl Page {
@@ -222,9 +231,23 @@ const ZOOM_STEP: usize = ZOOM_TIME_MORE + 1;
 const ZOOM_STEP_LESS: usize = ZOOM_STEP + 1;
 const ZOOM_STEP_MORE: usize = ZOOM_STEP_LESS + 1;
 const ZOOM_RESET: usize = ZOOM_STEP_MORE + 1;
+/// The start page's CPS button and that page's controls: two switches, moving, and the size
+/// value beside its - and + buttons.
+const OPEN_CPS: usize = ZOOM_RESET + 1;
+const CPS_ON: usize = OPEN_CPS + 1;
+const CPS_RIGHT: usize = CPS_ON + 1;
+const CPS_MOVE: usize = CPS_RIGHT + 1;
+const CPS_SIZE: usize = CPS_MOVE + 1;
+const CPS_SMALLER: usize = CPS_SIZE + 1;
+const CPS_BIGGER: usize = CPS_SMALLER + 1;
+const CPS_RESET: usize = CPS_BIGGER + 1;
+/// The CPS page's Leading zeros switch, added last so earlier indices never move.
+const CPS_ZEROS: usize = CPS_RESET + 1;
+/// The start page's Lighting button. Its page holds Fullbright and its key (earlier controls).
+const OPEN_LIGHT: usize = CPS_ZEROS + 1;
 /// The last control index.
 #[cfg(test)]
-const LAST_CONTROL: usize = ZOOM_RESET;
+const LAST_CONTROL: usize = OPEN_LIGHT;
 /// Width of the small - and + buttons.
 const STEP_W: f32 = 26.0;
 /// The highlight fix's Off / On button, beside its - and + buttons.
@@ -235,18 +258,19 @@ const HIGHLIGHT_W: f32 = SETTINGS_W - 20.0 - 2.0 * (STEP_W + 4.0);
 const EDIT_Y: f32 = 31.0;
 /// The start page: the two page buttons and the menu key.
 const HOME_BLOCK_Y: f32 = 34.0;
-const HOME_MOB_Y: f32 = 71.0;
-const HOME_COUNTER_Y: f32 = 108.0;
-const HOME_ZOOM_Y: f32 = 145.0;
-const HOME_BUTTON_H: f32 = 34.0;
-/// Below the page buttons: a Lighting section (Fullbright and its key) and a Menu section.
-const HOME_LIGHT_CAPTION_Y: f32 = HOME_ZOOM_Y + HOME_BUTTON_H + 8.0;
-const HOME_FULLBRIGHT_Y: f32 = HOME_LIGHT_CAPTION_Y + 14.0;
-const HOME_FULLBRIGHT_KEY_Y: f32 = HOME_FULLBRIGHT_Y + ROW_PITCH;
-const HOME_MENU_CAPTION_Y: f32 = HOME_FULLBRIGHT_KEY_Y + BUTTON_H + 12.0;
+const HOME_MOB_Y: f32 = 64.0;
+const HOME_COUNTER_Y: f32 = 94.0;
+const HOME_CPS_Y: f32 = 124.0;
+const HOME_ZOOM_Y: f32 = 154.0;
+const HOME_LIGHT_Y: f32 = 184.0;
+const HOME_BUTTON_H: f32 = 28.0;
+/// Below the page buttons: a Menu section.
+const HOME_MENU_CAPTION_Y: f32 = HOME_LIGHT_Y + HOME_BUTTON_H + 12.0;
 const HOME_KEY_Y: f32 = HOME_MENU_CAPTION_Y + 14.0;
 /// The mob page has no Fill row, so its options sit one row higher.
 const MOB_OPTIONS_SHIFT: f32 = ROW_STEP;
+/// Room the start page keeps for its fuel line, between its last control and the hint.
+const FUEL_LINE: f32 = 12.0;
 /// Room below a page's last control for the hint line.
 const CARD_FOOT: f32 = 28.0;
 /// The Arrow counter page's rows.
@@ -256,6 +280,17 @@ const COUNTER_CAPTION_Y: f32 = COUNTER_BOW_Y + ROW_PITCH + SECTION_GAP;
 const COUNTER_MOVE_Y: f32 = COUNTER_CAPTION_Y + 14.0;
 const COUNTER_SIZE_Y: f32 = COUNTER_MOVE_Y + ROW_PITCH;
 const COUNTER_RESET_Y: f32 = COUNTER_SIZE_Y + ROW_PITCH;
+/// The CPS page's rows.
+const CPS_ON_Y: f32 = 34.0;
+const CPS_RIGHT_Y: f32 = CPS_ON_Y + ROW_PITCH;
+const CPS_ZEROS_Y: f32 = CPS_RIGHT_Y + ROW_PITCH;
+const CPS_CAPTION_Y: f32 = CPS_ZEROS_Y + ROW_PITCH + SECTION_GAP;
+const CPS_MOVE_Y: f32 = CPS_CAPTION_Y + 14.0;
+const CPS_SIZE_Y: f32 = CPS_MOVE_Y + ROW_PITCH;
+const CPS_RESET_Y: f32 = CPS_SIZE_Y + ROW_PITCH;
+/// The Lighting page's rows.
+const LIGHT_ON_Y: f32 = 34.0;
+const LIGHT_KEY_Y: f32 = LIGHT_ON_Y + ROW_PITCH;
 /// The Zoom page's rows.
 const ZOOM_ON_Y: f32 = 34.0;
 const ZOOM_KEY_Y: f32 = ZOOM_ON_Y + ROW_PITCH;
@@ -268,25 +303,27 @@ const ZOOM_TIME_Y: f32 = ZOOM_LEVEL_Y + ROW_PITCH;
 const ZOOM_STEP_Y: f32 = ZOOM_TIME_Y + ROW_PITCH;
 const ZOOM_RESET_Y: f32 = ZOOM_STEP_Y + ROW_PITCH;
 /// The guide shown at the top of the screen while the counter is moved.
-const GUIDE_W: f32 = 240.0;
+pub const GUIDE_W: f32 = 240.0;
 /// Where the guide's text starts, after its accent.
 const GUIDE_TEXT_X: f32 = 20.0;
 /// What the guide says; each line has to fit the guide's width (about 5.9 units a letter).
 const GUIDE_LINES: [&str; 3] = [
-    "Drag the counter to move it",
+    "Drag a HUD element to move it",
     "Drag any corner square to resize it",
     "Snaps to the hotbar and screen middle",
 ];
-const GUIDE_H: f32 = 68.0;
+pub const GUIDE_H: f32 = 68.0;
 
 /// The card's height for what is shown: each page is only as tall as its controls, with the
 /// hint line below them; the colour tools use the full height.
 pub(super) fn card_height(state: MenuState) -> f32 {
     match state.page {
         _ if state.colour_open && state.page.outline() => CARD_H,
-        Page::Home => HOME_KEY_Y + BUTTON_H + CARD_FOOT,
+        Page::Home => HOME_KEY_Y + BUTTON_H + CARD_FOOT + FUEL_LINE,
         Page::Counter => COUNTER_RESET_Y + BUTTON_H + CARD_FOOT,
+        Page::Cps => CPS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Zoom => ZOOM_RESET_Y + BUTTON_H + CARD_FOOT,
+        Page::Lighting => LIGHT_KEY_Y + BUTTON_H + CARD_FOOT,
         Page::Block => HIGHLIGHT_Y + BUTTON_H + CARD_FOOT,
         Page::Mob => BOTTOM_Y - MOB_OPTIONS_SHIFT + BUTTON_H + CARD_FOOT,
     }
@@ -319,7 +356,12 @@ const fn track_width() -> f32 {
 const RGB_Y: f32 = 54.0;
 /// Wheel square's top-left corner and side, and the size of its colour cells.
 const WHEEL: [f32; 3] = [10.0, 122.0, 90.0];
-const WHEEL_CELL: f32 = 3.0;
+const WHEEL_CELL: f32 = 3.6;
+/// A wheel cell is a little larger than the grid step, so neighbours overlap and leave no seams;
+/// a quarter cell (on the rim) is a little over half of that. Each size is set once, on the
+/// template its cells inherit, which keeps hundreds of cells small.
+const WHEEL_CELL_SIZE: f32 = WHEEL_CELL + 0.25;
+const WHEEL_QUARTER_SIZE: f32 = WHEEL_CELL_SIZE / 2.0 + 0.2;
 const MARKER: f32 = 7.0;
 const HEX_X: f32 = WHEEL[0] + WHEEL[2] + 10.0;
 const HEX_Y: f32 = 124.0;
@@ -345,12 +387,14 @@ const SLIDER_KNOB: f32 = 12.0;
 const SLIDER_TRACK: [f32; 4] = [0.22, 0.23, 0.28, 1.0];
 /// The switches: the pill's colour while off (on is `ACTIVE`), and the header accent.
 const SWITCH_OFF: [f32; 4] = [0.43, 0.44, 0.52, 1.0];
-/// What each start page button says under its name (Block, Mob, Counter, Zoom).
-const HOME_ABOUT: [&str; 4] = [
+/// What each start page button says under its name (Block, Mob, Counter, Zoom, CPS, Lighting).
+const HOME_ABOUT: [&str; 6] = [
     "The block you are looking at",
     "Mobs and players you look at",
     "Arrows left, shown on your HUD",
     "Hold a key, scroll to zoom in",
+    "Left and right clicks per second",
+    "Fullbright for caves and nights",
 ];
 /// Settings sit in lighter inset panels, `SECTION_PAD` wider than their rows; the gap between two
 /// panels is `SECTION_GAP` more than the rows' own spacing.
@@ -369,9 +413,21 @@ const BADGE: f32 = 22.0;
 const TITLE_X: f32 = 8.0;
 const ACCENT: [f32; 4] = [0.66, 0.5, 0.97, 1.0];
 /// The switch rows: bound by `#<name>_bg` (pill colour) and `#<name>_knob` (knob position).
-const SWITCHES: [&str; 11] = [
-    "rainbow", "pulse", "fill_match", "show_all_mobs", "fullbright", "counter", "counter_bow",
-    "zoom", "zoom_mode", "zoom_scroll", "zoom_sens",
+const SWITCHES: [&str; 14] = [
+    "rainbow",
+    "pulse",
+    "fill_match",
+    "show_all_mobs",
+    "fullbright",
+    "counter",
+    "counter_bow",
+    "zoom",
+    "zoom_mode",
+    "zoom_scroll",
+    "zoom_sens",
+    "cps_on",
+    "cps_right",
+    "cps_zeros",
 ];
 /// The card's outline and the keyboard focus ring.
 const BORDER: [f32; 4] = [0.3, 0.31, 0.37, 1.0];
@@ -473,9 +529,11 @@ fn content_in(settings: &Settings, seconds: f32, state: MenuState) -> String {
         settings.show_all_mobs
     );
     controls.push_str(r#",{"kind":"button","id":"edit_aim","label":"Aimed colour"}"#);
-    controls.push_str(r#",{"kind":"button","id":"highlight_less","label":"Weaker highlight hiding"}"#);
     controls
-        .push_str(r#",{"kind":"button","id":"highlight_more","label":"Stronger highlight hiding"}"#);
+        .push_str(r#",{"kind":"button","id":"highlight_less","label":"Weaker highlight hiding"}"#);
+    controls.push_str(
+        r#",{"kind":"button","id":"highlight_more","label":"Stronger highlight hiding"}"#,
+    );
     let _ = write!(
         controls,
         r#",{{"kind":"toggle","id":"fullbright","label":"Fullbright","value":{}}}"#,
@@ -514,8 +572,35 @@ fn content_in(settings: &Settings, seconds: f32, state: MenuState) -> String {
         ("zoom_step_more", "Bigger scroll step"),
         ("zoom_reset", "Reset zoom"),
     ] {
-        let _ = write!(controls, r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#);
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#
+        );
     }
+    controls.push_str(r#",{"kind":"button","id":"open_cps","label":"CPS counter"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"cps_on","label":"CPS counter","value":{}}},{{"kind":"toggle","id":"cps_right","label":"Right clicks","value":{}}}"#,
+        settings.cps.on, settings.cps.right
+    );
+    for (id, label) in [
+        ("cps_move", "Move and resize"),
+        ("cps_size", "CPS size"),
+        ("cps_size_less", "Smaller CPS"),
+        ("cps_size_more", "Bigger CPS"),
+        ("cps_reset", "Reset CPS place"),
+    ] {
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#
+        );
+    }
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"cps_zeros","label":"Leading zeros","value":{}}}"#,
+        settings.cps.zeros
+    );
+    controls.push_str(r#",{"kind":"button","id":"open_light","label":"Lighting"}"#);
     format!(
         r#"{{"reference_size":[{},{}],"motion":true,"widget_colors":{{"background":[0.07,0.08,0.1,0.98],"surface":[0.2,0.21,0.24,1],"text":[0.92,0.93,0.95,1],"accent":[0.45,0.24,0.75,1],"border":[0.36,0.37,0.42,1]}},"controls":[{controls}],"surface":{{"screen":"block_outline.screen","document":{},"bindings":{}}}}}"#,
         // Shrinks the whole menu on windows too small for the card, with a small margin.
@@ -553,11 +638,13 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
         },
     );
     // The arrow counter lives on the HUD, which the menu hides on its other pages.
-    out.push_str(if state.page == Page::Counter || state.moving {
-        r#""show_gameplay_hud":true,"#
-    } else {
-        r#""show_gameplay_hud":false,"#
-    });
+    out.push_str(
+        if matches!(state.page, Page::Counter | Page::Cps) || state.moving {
+            r#""show_gameplay_hud":true,"#
+        } else {
+            r#""show_gameplay_hud":false,"#
+        },
+    );
     out.push_str(r#""control_values":["#);
     let value = |out: &mut String, index: usize, write: &dyn Fn(&mut String)| {
         if !out.ends_with('[') {
@@ -595,6 +682,9 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     value(&mut out, ZOOM_MODE, &boolean(settings.zoom.toggle));
     value(&mut out, ZOOM_SCROLL, &boolean(settings.zoom.scroll));
     value(&mut out, ZOOM_SENS, &boolean(settings.zoom.sensitivity));
+    value(&mut out, CPS_ON, &boolean(settings.cps.on));
+    value(&mut out, CPS_RIGHT, &boolean(settings.cps.right));
+    value(&mut out, CPS_ZEROS, &boolean(settings.cps.zeros));
     out.push_str(r#"],"binding_changes":"#);
     bindings_into(&mut out, settings, seconds, state);
     out.push('}');
@@ -712,8 +802,36 @@ fn title(id: &str) -> &'static str {
     }
 }
 
+/// A patch of only the start page's fuel line. Runs in a frame callback, so it writes the
+/// numbers with [`digits`].
+pub fn fuel_update(state: MenuState) -> String {
+    let mut out = String::with_capacity(112);
+    out.push_str(r##"{"binding_changes":{"#fuel_text":""##);
+    fuel_text(&mut out, state);
+    out.push_str(r##""}}"##);
+    out
+}
+
+/// The fuel line's text: nothing until a frame has been measured.
+fn fuel_text(out: &mut String, state: MenuState) {
+    let [last, peak] = state.fuel_k;
+    if peak == 0 {
+        return;
+    }
+    out.push_str("Fuel per frame: ");
+    digits(out, u64::from(last));
+    out.push_str("k now, ");
+    digits(out, u64::from(peak));
+    out.push_str("k busiest of 200k");
+}
+
 /// A patch showing the moving guide at the top or the bottom of the screen.
 pub fn guide_update(state: MenuState) -> String {
-    let (top, bottom) = (state.moving && !state.guide_bottom, state.moving && state.guide_bottom);
-    format!(r##"{{"binding_changes":{{"#guide_top_visible":{top},"#guide_bottom_visible":{bottom}}}}}"##)
+    let (top, bottom) = (
+        state.moving && !state.guide_bottom,
+        state.moving && state.guide_bottom,
+    );
+    format!(
+        r##"{{"binding_changes":{{"#guide_top_visible":{top},"#guide_bottom_visible":{bottom}}}}}"##
+    )
 }

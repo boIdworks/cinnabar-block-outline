@@ -143,7 +143,9 @@ pub fn focus_update(state: MenuState, fill_matches: bool) -> String {
 /// A patch moving the hover highlight onto control `tip`'s area, or hiding it, and putting its
 /// help on the bottom line at once (the floating box waits for the pointer to rest).
 pub fn highlight_update(tip: Option<usize>, state: MenuState, fill_matches: bool) -> String {
-    let area = tip.and_then(|index| tip_area(index, state, fill_matches)).map(|(area, _)| area);
+    let area = tip
+        .and_then(|index| tip_area(index, state, fill_matches))
+        .map(|(area, _)| area);
     let mut out = String::with_capacity(200);
     out.push_str(r##"{"binding_changes":{"##);
     ring(&mut out, "hover", area, 2.0);

@@ -159,7 +159,11 @@ impl Engine {
         Output {
             applying,
             fov_scale,
-            look_scale: if zoom.sensitivity { fov_scale.max(0.05) } else { 1.0 },
+            look_scale: if zoom.sensitivity {
+                fov_scale.max(0.05)
+            } else {
+                1.0
+            },
         }
     }
 }
@@ -178,15 +182,24 @@ mod tests {
         assert_eq!(captured_key(&keys(&["MouseLeft"]), z, menu), None);
         // Backspace and Delete unbind, even when a click came first.
         assert_eq!(captured_key(&keys(&["Backspace"]), z, menu), Some(None));
-        assert_eq!(captured_key(&keys(&["MouseLeft", "Delete"]), z, menu), Some(None));
+        assert_eq!(
+            captured_key(&keys(&["MouseLeft", "Delete"]), z, menu),
+            Some(None)
+        );
         // Escape cancels: the key stays as it was, bound or not.
         assert_eq!(captured_key(&keys(&["Escape"]), z, menu), Some(z));
-        assert_eq!(captured_key(&keys(&["MouseLeft", "Escape"]), z, menu), Some(z));
+        assert_eq!(
+            captured_key(&keys(&["MouseLeft", "Escape"]), z, menu),
+            Some(z)
+        );
         assert_eq!(captured_key(&keys(&["Escape"]), None, menu), Some(None));
         // Unbinding an unbound key stays unbound.
         assert_eq!(captured_key(&keys(&["Delete"]), None, menu), Some(None));
         // Any other key becomes the key; the menu key is refused and nothing changes.
-        assert_eq!(captured_key(&keys(&["KeyC"]), z, menu), Some(KeyName::new("KeyC")));
+        assert_eq!(
+            captured_key(&keys(&["KeyC"]), z, menu),
+            Some(KeyName::new("KeyC"))
+        );
         assert_eq!(captured_key(&keys(&["KeyL"]), z, menu), Some(z));
         assert_eq!(captured_key(&keys(&["KeyL"]), None, menu), Some(None));
     }
@@ -236,14 +249,24 @@ mod tests {
 
     #[test]
     fn steps_scale_the_level_and_reset_each_zoom() {
-        let zoom = Zoom { time: 0.0, ..Zoom::default() };
+        let zoom = Zoom {
+            time: 0.0,
+            ..Zoom::default()
+        };
         let mut engine = Engine::default();
         engine.tick(&zoom, true, 0, 0.016);
-        assert!((engine.divisor - 4.0).abs() < 1e-4, "instant with zero time");
+        assert!(
+            (engine.divisor - 4.0).abs() < 1e-4,
+            "instant with zero time"
+        );
         // Two notches in at 20% each, one out.
         engine.tick(&zoom, true, 2, 0.016);
         engine.tick(&zoom, true, -1, 0.016);
-        assert!((engine.divisor - 4.0 * 1.2).abs() < 1e-4, "{}", engine.divisor);
+        assert!(
+            (engine.divisor - 4.0 * 1.2).abs() < 1e-4,
+            "{}",
+            engine.divisor
+        );
         // The limits hold: nowhere near past 10x, nor below a sliver of zoom.
         engine.tick(&zoom, true, 8, 0.016);
         engine.tick(&zoom, true, 8, 0.016);
@@ -264,11 +287,20 @@ mod tests {
 
     #[test]
     fn sensitivity_option_and_clamps() {
-        let zoom = Zoom { time: 0.0, sensitivity: false, level: 8.0, ..Zoom::default() };
+        let zoom = Zoom {
+            time: 0.0,
+            sensitivity: false,
+            level: 8.0,
+            ..Zoom::default()
+        };
         let mut engine = Engine::default();
         let out = engine.tick(&zoom, true, 0, 0.016);
         assert!((out.fov_scale - 0.125).abs() < 1e-5 && out.look_scale == 1.0);
-        let max = Zoom { time: 0.0, level: MAX_LEVEL, ..Zoom::default() };
+        let max = Zoom {
+            time: 0.0,
+            level: MAX_LEVEL,
+            ..Zoom::default()
+        };
         assert!((Engine::default().tick(&max, true, 0, 0.016).look_scale - 0.1).abs() < 1e-4);
         assert_eq!(clamp_level(99.0), MAX_LEVEL);
         assert_eq!(clamp_level(0.0), MIN_LEVEL);

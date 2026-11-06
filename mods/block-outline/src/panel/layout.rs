@@ -7,7 +7,11 @@ use super::*;
 fn short(value: f32) -> String {
     let text = format!("{value:.3}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
-    if text.is_empty() { "0".into() } else { text.into() }
+    if text.is_empty() {
+        "0".into()
+    } else {
+        text.into()
+    }
 }
 
 /// Offset that centres a line of text in a control `height` tall.
@@ -64,12 +68,18 @@ pub(super) fn button(name: &str, area: [f32; 4], action: &str, children: &[Strin
 
 /// Centres a label's text within its box.
 fn centred(label: String) -> String {
-    label.replacen(r#""type":"label","#, r#""type":"label","text_alignment":"center","#, 1)
+    label.replacen(
+        r#""type":"label","#,
+        r#""type":"label","text_alignment":"center","#,
+        1,
+    )
 }
 
 /// `button` (as [`button`] builds it) with `child` added after its other children.
 fn with_last_child(button: &str, child: &str) -> String {
-    let close = button.rfind("]}}").expect("a button ends with its list of controls");
+    let close = button
+        .rfind("]}}")
+        .expect("a button ends with its list of controls");
     format!("{},{child}{}", &button[..close], &button[close..])
 }
 
@@ -125,7 +135,13 @@ pub(super) fn switch_button(name: &str, area: [f32; 4], control: usize, caption:
         area,
         &format!("mod.control:{control}"),
         &[
-            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
+            rect(
+                "bg",
+                r#"["100%","100%"]"#,
+                [0.0, 0.0],
+                TRACK,
+                r#","layer":1"#,
+            ),
             label(
                 "text",
                 caption,
@@ -146,7 +162,13 @@ pub(super) fn key_button(name: &str, area: [f32; 4], control: usize) -> String {
         area,
         &format!("mod.control:{control}"),
         &[
-            rect("lip", r#"["100%","100%"]"#, [0.0, 0.0], KEY_LIP, r#","layer":1"#),
+            rect(
+                "lip",
+                r#"["100%","100%"]"#,
+                [0.0, 0.0],
+                KEY_LIP,
+                r#","layer":1"#,
+            ),
             rect(
                 "cap",
                 &format!(r#"["100%","100% - {KEY_LIP_H}px"]"#),
@@ -178,7 +200,11 @@ pub(super) fn value_button(name: &str, area: [f32; 4], control: usize) -> String
         [0.0, text_y(area[3])],
         DIM,
     )
-    .replacen(r#""type":"label","#, r#""type":"label","text_alignment":"right","#, 1);
+    .replacen(
+        r#""type":"label","#,
+        r#""type":"label","text_alignment":"right","#,
+        1,
+    );
     with_last_child(&button, &hint)
 }
 
@@ -206,8 +232,20 @@ pub(super) fn plain_button(name: &str, area: [f32; 4], control: usize, caption: 
         area,
         &format!("mod.control:{control}"),
         &[
-            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
-            centred(label("text", caption, [area[2], 10.0], [0.0, text_y(area[3])], TEXT)),
+            rect(
+                "bg",
+                r#"["100%","100%"]"#,
+                [0.0, 0.0],
+                TRACK,
+                r#","layer":1"#,
+            ),
+            centred(label(
+                "text",
+                caption,
+                [area[2], 10.0],
+                [0.0, text_y(area[3])],
+                TEXT,
+            )),
         ],
     )
 }
@@ -321,8 +359,6 @@ pub(super) fn wheel() -> String {
     let [x, y, side] = WHEEL;
     // A disc of small cells: hue by angle, saturation by distance from the centre.
     let cells = (side / WHEEL_CELL) as usize;
-    // A little larger than the grid step, so neighbouring cells overlap and leave no seams.
-    let s = WHEEL_CELL + 0.25;
     let mut children = Vec::with_capacity(cells * cells + 2);
     // A dark rim a little wider than the disc hides the stepped edge of its cells.
     children.push(
@@ -333,14 +369,17 @@ pub(super) fn wheel() -> String {
             [0.1, 0.11, 0.14, 1.0],
             r#","layer":1"#,
         )
-        .replace(r#""radius":3"#, &format!(r#""radius":{}"#, side / 2.0 + 1.5)),
+        .replace(
+            r#""radius":3"#,
+            &format!(r#""radius":{}"#, side / 2.0 + 1.5),
+        ),
     );
     // Where a cell's centre falls: inside the disc or not, and how far from its middle.
     let place = |column: f32, row: f32| {
         let (dx, dy) = (column / cells as f32 - 0.5, 0.5 - row / cells as f32);
         (2.0 * (dx * dx + dy * dy).sqrt(), dy, dx)
     };
-    let mut cell = |column: f32, row: f32, size: f32| {
+    let mut cell = |column: f32, row: f32, template: &str| {
         let (distance, dy, dx) = place(column, row);
         if distance > 1.0 {
             return;
@@ -351,7 +390,7 @@ pub(super) fn wheel() -> String {
         let [r, g, b] = hsv_to_rgb(hue, distance, 1.0).map(|c| short(f32::from(c) / 255.0));
         let name = children.len();
         children.push(format!(
-            r#"{{"c{name}@block_outline.cell":{{"size":[{size},{size}],"offset":[{},{}],"color":[{r},{g},{b},1]}}}}"#,
+            r#"{{"c{name}@block_outline.{template}":{{"offset":[{},{}],"color":[{r},{g},{b},1]}}}}"#,
             // Anchored at the centre, as every control is by default, which saves the two
             // anchor fields on each of the wheel's several hundred cells.
             column * WHEEL_CELL - side / 2.0,
@@ -369,12 +408,11 @@ pub(super) fn wheel() -> String {
                 .iter()
                 .any(|&(dc, dr)| inside(dc, dr) != here);
             if rim {
-                let quarter = s / 2.0 + 0.2;
                 for (qc, qr) in [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
-                    cell(c + qc, r + qr, quarter);
+                    cell(c + qc, r + qr, "cell_q");
                 }
             } else if here {
-                cell(c, r, s);
+                cell(c, r, "cell");
             }
         }
     }
@@ -517,31 +555,56 @@ pub(super) fn top_controls() -> Vec<String> {
 
 /// The start page: a button for each page and the menu key.
 pub(super) fn home_controls() -> Vec<String> {
-    let page_button = |name: &str, y: f32, control: usize, icon: usize, title: &str, about: &str| {
-        let badge = (HOME_BUTTON_H - BADGE) / 2.0;
-        let mut children = vec![
-            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
-            // A dark tile with the page's icon on it, drawn in the page's current colour.
-            rect(
-                "badge",
-                &format!("[{BADGE},{BADGE}]"),
-                [badge, badge],
-                ICON_BG,
-                r#","layer":2"#,
+    let page_button =
+        |name: &str, y: f32, control: usize, icon: usize, title: &str, about: &str| {
+            let badge = (HOME_BUTTON_H - BADGE) / 2.0;
+            let mut children = vec![
+                rect(
+                    "bg",
+                    r#"["100%","100%"]"#,
+                    [0.0, 0.0],
+                    TRACK,
+                    r#","layer":1"#,
+                ),
+                // A dark tile with the page's icon on it, drawn in the page's current colour.
+                rect(
+                    "badge",
+                    &format!("[{BADGE},{BADGE}]"),
+                    [badge, badge],
+                    ICON_BG,
+                    r#","layer":2"#,
+                )
+                .replace(r#""radius":3"#, r#""radius":6"#),
+            ];
+            children.extend(home_icon(name, icon, badge));
+            children.push(label(
+                "name",
+                title,
+                [SETTINGS_W - 70.0, 10.0],
+                [badge * 2.0 + BADGE, 3.5],
+                TEXT,
+            ));
+            children.push(label(
+                "about",
+                about,
+                [SETTINGS_W - 70.0, 10.0],
+                [badge * 2.0 + BADGE, 15.0],
+                DIM,
+            ));
+            children.push(label(
+                "arrow",
+                ">",
+                [10.0, 10.0],
+                [SETTINGS_W - 34.0, 9.0],
+                TEXT,
+            ));
+            button(
+                name,
+                [10.0, y, SETTINGS_W - 20.0, HOME_BUTTON_H],
+                &format!("mod.control:{control}"),
+                &children,
             )
-            .replace(r#""radius":3"#, r#""radius":6"#),
-        ];
-        children.extend(home_icon(name, icon, badge));
-        children.push(label("name", title, [SETTINGS_W - 70.0, 10.0], [badge * 2.0 + BADGE, 6.0], TEXT));
-        children.push(label("about", about, [SETTINGS_W - 70.0, 10.0], [badge * 2.0 + BADGE, 19.0], DIM));
-        children.push(label("arrow", ">", [10.0, 10.0], [SETTINGS_W - 34.0, 12.0], TEXT));
-        button(
-            name,
-            [10.0, y, SETTINGS_W - 20.0, HOME_BUTTON_H],
-            &format!("mod.control:{control}"),
-            &children,
-        )
-    };
+        };
     vec![
         page_button(
             "open_block",
@@ -568,6 +631,14 @@ pub(super) fn home_controls() -> Vec<String> {
             HOME_ABOUT[2],
         ),
         page_button(
+            "open_cps",
+            HOME_CPS_Y,
+            OPEN_CPS,
+            4,
+            "CPS counter",
+            HOME_ABOUT[4],
+        ),
+        page_button(
             "open_zoom",
             HOME_ZOOM_Y,
             OPEN_ZOOM,
@@ -575,23 +646,13 @@ pub(super) fn home_controls() -> Vec<String> {
             "Zoom",
             HOME_ABOUT[3],
         ),
-        caption("light_caption", "Lighting", HOME_LIGHT_CAPTION_Y),
-        switch_button("fullbright", [10.0, HOME_FULLBRIGHT_Y, SETTINGS_W - 20.0, BUTTON_H], FULLBRIGHT, "Fullbright"),
-        label(
-            "fullbright_key_title",
-            "Fullbright key",
-            [KEY_X - 12.0, 10.0],
-            [10.0, HOME_FULLBRIGHT_KEY_Y + text_y(BUTTON_H)],
-            TEXT,
-        ),
-        key_button("fullbright_key",
-            [
-                KEY_X,
-                HOME_FULLBRIGHT_KEY_Y,
-                SETTINGS_W - 10.0 - KEY_X,
-                BUTTON_H,
-            ],
-            FULLBRIGHT_KEY,
+        page_button(
+            "open_light",
+            HOME_LIGHT_Y,
+            OPEN_LIGHT,
+            5,
+            "Lighting",
+            HOME_ABOUT[5],
         ),
         caption("menu_caption", "Menu", HOME_MENU_CAPTION_Y),
         label(
@@ -601,9 +662,18 @@ pub(super) fn home_controls() -> Vec<String> {
             [10.0, HOME_KEY_Y + text_y(BUTTON_H)],
             TEXT,
         ),
-        key_button("menu_key",
+        key_button(
+            "menu_key",
             [KEY_X, HOME_KEY_Y, SETTINGS_W - 10.0 - KEY_X, BUTTON_H],
             MENU_KEY,
+        ),
+        // How much of a frame's fuel the mod uses, to see how close it runs to the limit.
+        label(
+            "fuel",
+            "#fuel_text",
+            [SETTINGS_W - 20.0, 10.0],
+            [10.0, HOME_KEY_Y + BUTTON_H + 4.0],
+            DIM,
         ),
     ]
 }
@@ -620,8 +690,14 @@ fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
         } else {
             format!(r#","layer":{layer}"#)
         };
-        rect(id, &format!("[{w},{h}]"), [at + x, at + y], if stroke { [1.0; 4] } else { ICON_BG }, &extra)
-            .replace(r#""radius":3"#, &format!(r#""radius":{radius}"#))
+        rect(
+            id,
+            &format!("[{w},{h}]"),
+            [at + x, at + y],
+            if stroke { [1.0; 4] } else { ICON_BG },
+            &extra,
+        )
+        .replace(r#""radius":3"#, &format!(r#""radius":{radius}"#))
     };
     match kind {
         // Two outlined squares, the front one over the back one: a block.
@@ -646,6 +722,22 @@ fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
             piece("i3", 13.0, 14.0, 2.0, 2.0, 0.0, true, 3),
             piece("i4", 15.0, 12.0, 2.0, 2.0, 0.0, true, 3),
         ],
+        // A sun: a ring with four rays.
+        5 => vec![
+            piece("i0", 6.0, 6.0, 10.0, 10.0, 5.0, true, 3),
+            piece("i1", 8.0, 8.0, 6.0, 6.0, 3.0, false, 4),
+            piece("i2", 10.5, 2.0, 1.0, 3.0, 0.0, true, 3),
+            piece("i3", 10.5, 17.0, 1.0, 3.0, 0.0, true, 3),
+            piece("i4", 2.0, 10.5, 3.0, 1.0, 0.0, true, 3),
+            piece("i5", 17.0, 10.5, 3.0, 1.0, 0.0, true, 3),
+        ],
+        // A mouse: an outlined body with the button split.
+        4 => vec![
+            piece("i0", 6.0, 3.0, 10.0, 16.0, 5.0, true, 3),
+            piece("i1", 7.5, 4.5, 7.0, 13.0, 3.5, false, 4),
+            piece("i2", 10.5, 4.5, 1.0, 5.0, 0.0, true, 5),
+            piece("i3", 7.5, 9.5, 7.0, 1.0, 0.0, true, 5),
+        ],
         // A magnifier: a ring and a handle.
         _ => vec![
             piece("i0", 4.0, 4.0, 12.0, 12.0, 6.0, true, 3),
@@ -660,8 +752,18 @@ fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
 pub(super) fn counter_controls() -> Vec<String> {
     let full = SETTINGS_W - 20.0;
     vec![
-        switch_button("counter", [10.0, COUNTER_ON_Y, full, BUTTON_H], COUNTER, "Show counter"),
-        switch_button("counter_bow", [10.0, COUNTER_BOW_Y, full, BUTTON_H], COUNTER_BOW, "Only with a bow"),
+        switch_button(
+            "counter",
+            [10.0, COUNTER_ON_Y, full, BUTTON_H],
+            COUNTER,
+            "Show counter",
+        ),
+        switch_button(
+            "counter_bow",
+            [10.0, COUNTER_BOW_Y, full, BUTTON_H],
+            COUNTER_BOW,
+            "Only with a bow",
+        ),
         caption("counter_caption", "Place", COUNTER_CAPTION_Y),
         plain_button(
             "counter_move",
@@ -669,7 +771,8 @@ pub(super) fn counter_controls() -> Vec<String> {
             COUNTER_MOVE,
             "Move and resize on screen",
         ),
-        value_button("counter_size",
+        value_button(
+            "counter_size",
             [10.0, COUNTER_SIZE_Y, HIGHLIGHT_W, BUTTON_H],
             COUNTER_SIZE,
         ),
@@ -690,11 +793,81 @@ pub(super) fn counter_controls() -> Vec<String> {
             COUNTER_BIGGER,
             "+",
         ),
-        action_button("counter_reset",
+        action_button(
+            "counter_reset",
             [10.0, COUNTER_RESET_Y, full, BUTTON_H],
             COUNTER_RESET,
         ),
     ]
+}
+
+/// The Lighting page: Fullbright and its key.
+pub(super) fn lighting_controls() -> Vec<String> {
+    vec![
+        switch_button(
+            "fullbright",
+            [10.0, LIGHT_ON_Y, SETTINGS_W - 20.0, BUTTON_H],
+            FULLBRIGHT,
+            "Fullbright",
+        ),
+        label(
+            "fullbright_key_title",
+            "Fullbright key",
+            [KEY_X - 12.0, 10.0],
+            [10.0, LIGHT_KEY_Y + text_y(BUTTON_H)],
+            TEXT,
+        ),
+        key_button(
+            "fullbright_key",
+            [KEY_X, LIGHT_KEY_Y, SETTINGS_W - 10.0 - KEY_X, BUTTON_H],
+            FULLBRIGHT_KEY,
+        ),
+    ]
+}
+
+/// The CPS page: on/off, right clicks, moving, size and reset.
+pub(super) fn cps_controls() -> Vec<String> {
+    let full = SETTINGS_W - 20.0;
+    let mut page = vec![
+        switch_button(
+            "cps_on",
+            [10.0, CPS_ON_Y, full, BUTTON_H],
+            CPS_ON,
+            "Show CPS",
+        ),
+        switch_button(
+            "cps_right",
+            [10.0, CPS_RIGHT_Y, full, BUTTON_H],
+            CPS_RIGHT,
+            "Show right clicks",
+        ),
+        switch_button(
+            "cps_zeros",
+            [10.0, CPS_ZEROS_Y, full, BUTTON_H],
+            CPS_ZEROS,
+            "Leading zeros",
+        ),
+        caption("cps_caption", "Place", CPS_CAPTION_Y),
+        plain_button(
+            "cps_move",
+            [10.0, CPS_MOVE_Y, full, BUTTON_H],
+            CPS_MOVE,
+            "Move and resize on screen",
+        ),
+    ];
+    page.extend(stepper(
+        "cps_size",
+        CPS_SIZE_Y,
+        CPS_SIZE,
+        CPS_SMALLER,
+        CPS_BIGGER,
+    ));
+    page.push(action_button(
+        "cps_reset",
+        [10.0, CPS_RESET_Y, full, BUTTON_H],
+        CPS_RESET,
+    ));
+    page
 }
 
 /// A value row: the value on a button that resets it, beside - and + buttons.
@@ -720,7 +893,12 @@ fn stepper(name: &str, y: f32, value: usize, less: usize, more: usize) -> Vec<St
 pub(super) fn zoom_controls() -> Vec<String> {
     let full = SETTINGS_W - 20.0;
     let mut page = vec![
-        switch_button("zoom", [10.0, ZOOM_ON_Y, full, BUTTON_H], ZOOM_ON, "Enable zoom"),
+        switch_button(
+            "zoom",
+            [10.0, ZOOM_ON_Y, full, BUTTON_H],
+            ZOOM_ON,
+            "Enable zoom",
+        ),
         label(
             "zoom_key_title",
             "Zoom key",
@@ -728,13 +906,29 @@ pub(super) fn zoom_controls() -> Vec<String> {
             [10.0, ZOOM_KEY_Y + text_y(BUTTON_H)],
             TEXT,
         ),
-        key_button("zoom_key",
+        key_button(
+            "zoom_key",
             [KEY_X, ZOOM_KEY_Y, SETTINGS_W - 10.0 - KEY_X, BUTTON_H],
             ZOOM_KEY,
         ),
-        switch_button("zoom_mode", [10.0, ZOOM_MODE_Y, full, BUTTON_H], ZOOM_MODE, "Press to toggle"),
-        switch_button("zoom_scroll", [10.0, ZOOM_SCROLL_Y, full, BUTTON_H], ZOOM_SCROLL, "Scroll zoom"),
-        switch_button("zoom_sens", [10.0, ZOOM_SENS_Y, full, BUTTON_H], ZOOM_SENS, "Relative sensitivity"),
+        switch_button(
+            "zoom_mode",
+            [10.0, ZOOM_MODE_Y, full, BUTTON_H],
+            ZOOM_MODE,
+            "Press to toggle",
+        ),
+        switch_button(
+            "zoom_scroll",
+            [10.0, ZOOM_SCROLL_Y, full, BUTTON_H],
+            ZOOM_SCROLL,
+            "Scroll zoom",
+        ),
+        switch_button(
+            "zoom_sens",
+            [10.0, ZOOM_SENS_Y, full, BUTTON_H],
+            ZOOM_SENS,
+            "Relative sensitivity",
+        ),
         caption("zoom_caption", "Feel", ZOOM_CAPTION_Y),
     ];
     page.extend(stepper(
@@ -758,7 +952,8 @@ pub(super) fn zoom_controls() -> Vec<String> {
         ZOOM_STEP_LESS,
         ZOOM_STEP_MORE,
     ));
-    page.push(action_button("zoom_reset",
+    page.push(action_button(
+        "zoom_reset",
         [10.0, ZOOM_RESET_Y, full, BUTTON_H],
         ZOOM_RESET,
     ));
@@ -795,7 +990,13 @@ fn moving_guide(name: &str, anchor: &str, offset_y: f32) -> String {
             r#","layer":1"#,
         )
         .replace(r#""radius":3"#, r#""radius":7"#),
-        rect("guide_accent", "[3,34]", [10.0, 8.0], ACCENT, r#","layer":2"#),
+        rect(
+            "guide_accent",
+            "[3,34]",
+            [10.0, 8.0],
+            ACCENT,
+            r#","layer":2"#,
+        ),
     ];
     for (index, line) in lines.iter().enumerate() {
         children.push(label(
@@ -846,27 +1047,48 @@ pub(super) fn settings_column() -> Vec<String> {
         "block_effects",
         "block_only",
         &[
-            switch_button("rainbow", [10.0, TOGGLES_Y, HALF, BUTTON_H], RAINBOW, "Rainbow"),
+            switch_button(
+                "rainbow",
+                [10.0, TOGGLES_Y, HALF, BUTTON_H],
+                RAINBOW,
+                "Rainbow",
+            ),
             switch_button("pulse", [right, TOGGLES_Y, HALF, BUTTON_H], PULSE, "Pulse"),
         ],
     ));
     options.push(shown_by(
         "mob_effects",
         "mob_only",
-        &[switch_button("rainbow", [10.0, TOGGLES_Y, SETTINGS_W - 20.0, BUTTON_H], RAINBOW, "Rainbow")],
+        &[switch_button(
+            "rainbow",
+            [10.0, TOGGLES_Y, SETTINGS_W - 20.0, BUTTON_H],
+            RAINBOW,
+            "Rainbow",
+        )],
     ));
     // Blocks: Fill match beside Reset. Mobs: All mobs beside Reset.
     options.push(shown_by(
         "block_bottom",
         "block_only",
-        &[switch_button("fill_match", [10.0, BOTTOM_Y, HALF, BUTTON_H], FILL_MATCH, "Match fill")],
+        &[switch_button(
+            "fill_match",
+            [10.0, BOTTOM_Y, HALF, BUTTON_H],
+            FILL_MATCH,
+            "Match fill",
+        )],
     ));
     options.push(shown_by(
         "mob_bottom",
         "mob_only",
-        &[switch_button("show_all_mobs", [10.0, BOTTOM_Y, HALF, BUTTON_H], SHOW_ALL, "All mobs")],
+        &[switch_button(
+            "show_all_mobs",
+            [10.0, BOTTOM_Y, HALF, BUTTON_H],
+            SHOW_ALL,
+            "All mobs",
+        )],
     ));
-    options.push(action_button("reset",
+    options.push(action_button(
+        "reset",
         [right, BOTTOM_Y, HALF, BUTTON_H],
         RESET,
     ));
@@ -983,7 +1205,12 @@ pub(super) fn colour_column() -> Vec<String> {
     for slot in 0..FAVOURITES {
         column.push(colour_button(
             &format!("favourite_{slot}"),
-            [10.0 + 34.0 * slot as f32, FAVOURITE_Y + 12.0, 30.0, BUTTON_H],
+            [
+                10.0 + 34.0 * slot as f32,
+                FAVOURITE_Y + 12.0,
+                30.0,
+                BUTTON_H,
+            ],
             FIRST_FAVOURITE + slot,
             Err(&format!("#favourite_{slot}_color")),
         ));
@@ -991,7 +1218,12 @@ pub(super) fn colour_column() -> Vec<String> {
     let save_x = 10.0 + 34.0 * FAVOURITES as f32;
     column.push(plain_button(
         "save_favourite",
-        [save_x, FAVOURITE_Y + 12.0, SETTINGS_W - 10.0 - save_x, BUTTON_H],
+        [
+            save_x,
+            FAVOURITE_Y + 12.0,
+            SETTINGS_W - 10.0 - save_x,
+            BUTTON_H,
+        ],
         SAVE_FAVOURITE,
         "Save colour",
     ));
@@ -1013,8 +1245,16 @@ fn section(name: &str, top: f32, bottom: f32) -> String {
 /// One side of the focus frame, moved by `#focus_<side>` and sized along its length by
 /// `#focus_wide` (top and bottom) or `#focus_tall` (left and right).
 fn focus_edge(name: &str, side: &str, vertical: bool) -> String {
-    let size = if vertical { format!("[{FOCUS_LINE},10]") } else { format!("[10,{FOCUS_LINE}]") };
-    let (length, axis) = if vertical { ("#focus_tall", "#size_binding_y_absolute") } else { ("#focus_wide", "#size_binding_x_absolute") };
+    let size = if vertical {
+        format!("[{FOCUS_LINE},10]")
+    } else {
+        format!("[10,{FOCUS_LINE}]")
+    };
+    let (length, axis) = if vertical {
+        ("#focus_tall", "#size_binding_y_absolute")
+    } else {
+        ("#focus_wide", "#size_binding_x_absolute")
+    };
     rect(
         name,
         &size,
@@ -1056,7 +1296,11 @@ fn sections() -> String {
         "mob_settings",
         &[
             section("look", first, row_end(ROW_Y + ROW_STEP)),
-            section("options", options - MOB_OPTIONS_SHIFT, row_end(BOTTOM_Y - MOB_OPTIONS_SHIFT)),
+            section(
+                "options",
+                options - MOB_OPTIONS_SHIFT,
+                row_end(BOTTOM_Y - MOB_OPTIONS_SHIFT),
+            ),
         ],
     ));
     let counter = behind(shown_when(
@@ -1065,6 +1309,17 @@ fn sections() -> String {
             section("display", EDIT_Y - pad, row_end(COUNTER_BOW_Y)),
             section("place", COUNTER_CAPTION_Y - pad, row_end(COUNTER_RESET_Y)),
         ],
+    ));
+    let cps = behind(shown_when(
+        "cps_page",
+        &[
+            section("display", EDIT_Y - pad, row_end(CPS_ZEROS_Y)),
+            section("place", CPS_CAPTION_Y - pad, row_end(CPS_RESET_Y)),
+        ],
+    ));
+    let light = behind(shown_when(
+        "light_page",
+        &[section("lighting", EDIT_Y - pad, row_end(LIGHT_KEY_Y))],
     ));
     let zoom = behind(shown_when(
         "zoom_page",
@@ -1079,17 +1334,22 @@ fn sections() -> String {
         "colour",
         &[
             section("picker", RGB_Y - pad, WHEEL[1] + WHEEL[2] + pad),
-            section("palette", SWATCH_Y - pad, FAVOURITE_Y + 12.0 + BUTTON_H + pad),
+            section(
+                "palette",
+                SWATCH_Y - pad,
+                FAVOURITE_Y + 12.0 + BUTTON_H + pad,
+            ),
         ],
     ));
     let home = behind(shown_when(
         "home",
-        &[
-            section("lighting", HOME_LIGHT_CAPTION_Y - pad, row_end(HOME_FULLBRIGHT_KEY_Y)),
-            section("menu", HOME_MENU_CAPTION_Y - pad, row_end(HOME_KEY_Y)),
-        ],
+        &[section(
+            "menu",
+            HOME_MENU_CAPTION_Y - pad,
+            row_end(HOME_KEY_Y),
+        )],
     ));
-    format!("{block},{mob},{counter},{zoom},{colour},{home}")
+    format!("{block},{mob},{counter},{cps},{zoom},{light},{colour},{home}")
 }
 
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned
@@ -1149,7 +1409,9 @@ pub(super) fn document() -> String {
             colour_column().join(",")
         ),
         shown_when("counter_page", &counter_controls()),
+        shown_when("cps_page", &cps_controls()),
         shown_when("zoom_page", &zoom_controls()),
+        shown_when("light_page", &lighting_controls()),
         // Hover help: hidden until the mod shows it next to the pointer.
         format!(
             r##"{{"tip":{{"type":"panel","size":[{TIP_WIDTH},14],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","layer":20,"bindings":[{{"binding_name":"#tip_visible","binding_name_override":"#visible"}},{{"binding_name":"#tip_offset","binding_name_override":"#offset"}}],"controls":[{},{}]}}}}"##,
@@ -1158,7 +1420,7 @@ pub(super) fn document() -> String {
         ),
     ];
     format!(
-        r##"{{"namespace":"block_outline","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"bindings":[{{"binding_name":"#card_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}},{}]}},"cell":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","radius":0,"layer":1}}}}"##,
+        r##"{{"namespace":"block_outline","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"bindings":[{{"binding_name":"#card_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}},{}]}},"cell":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_CELL_SIZE},{WHEEL_CELL_SIZE}],"radius":0,"layer":1}},"cell_q":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_QUARTER_SIZE},{WHEEL_QUARTER_SIZE}],"radius":0,"layer":1}}}}"##,
         card.join(","),
         moving_guides()
     )

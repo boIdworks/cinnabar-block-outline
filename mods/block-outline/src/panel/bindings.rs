@@ -27,7 +27,14 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
             out.push_str(",\"#");
             out.push_str(name);
             out.push_str("_knob\":[");
-            fixed(out, if on { PILL_W - KNOB - KNOB_OFF } else { KNOB_OFF });
+            fixed(
+                out,
+                if on {
+                    PILL_W - KNOB - KNOB_OFF
+                } else {
+                    KNOB_OFF
+                },
+            );
             out.push_str(",0],");
             return;
         }
@@ -184,6 +191,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     for (name, asked, idle) in [
         ("reset", Reset::Page, "Reset page"),
         ("counter_reset", Reset::Counter, "Reset place and size"),
+        ("cps_reset", Reset::Cps, "Reset place and size"),
         ("zoom_reset", Reset::Zoom, "Reset zoom"),
     ] {
         let asking = state.confirm == asked;
@@ -228,12 +236,52 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         },
         counter.bow_only,
     );
+    let cps = settings.cps;
+    toggle(
+        out,
+        "cps_on",
+        if cps.on { "CPS: On" } else { "CPS: Off" },
+        cps.on,
+    );
+    toggle(
+        out,
+        "cps_right",
+        if cps.right {
+            "Right clicks: On"
+        } else {
+            "Right clicks: Off"
+        },
+        cps.right,
+    );
+    toggle(
+        out,
+        "cps_zeros",
+        if cps.zeros {
+            "Leading zeros: On"
+        } else {
+            "Leading zeros: Off"
+        },
+        cps.zeros,
+    );
+    let mut size = String::from("Size: ");
+    digits(&mut size, (cps.scale * 100.0).round().max(0.0) as u64);
+    size.push_str("%%");
+    toggle(out, "cps_size", &size, false);
     let zoom = settings.zoom;
-    toggle(out, "zoom", if zoom.on { "Zoom: On" } else { "Zoom: Off" }, zoom.on);
+    toggle(
+        out,
+        "zoom",
+        if zoom.on { "Zoom: On" } else { "Zoom: Off" },
+        zoom.on,
+    );
     toggle(
         out,
         "zoom_mode",
-        if zoom.toggle { "Mode: Press to toggle" } else { "Mode: Hold the key" },
+        if zoom.toggle {
+            "Mode: Press to toggle"
+        } else {
+            "Mode: Hold the key"
+        },
         zoom.toggle,
     );
     toggle(
@@ -290,6 +338,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("zoom_time", zoom.time != defaults.time),
         ("zoom_step", zoom.step != defaults.step),
         ("counter_size", counter.scale != 1.0),
+        ("cps_size", cps.scale != 1.0),
     ] {
         out.push_str("\"#");
         out.push_str(name);
@@ -304,17 +353,27 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     vector(out, TRACK);
     // The start page's Arrow counter button: an arrow-shaft brown stripe.
     out.push_str(r##","#open_counter_color":[0.82,0.68,0.47,1],"##);
-    out.push_str(r##""#title_text":""##);
+    // The CPS button's mouse and the Lighting button's sun.
+    out.push_str(r##""#open_cps_color":[0.6,0.9,0.65,1],"#open_light_color":[1,0.88,0.45,1],"##);
+    out.push_str(r##""#fuel_text":""##);
+    fuel_text(out, state);
+    out.push_str(r##"","#title_text":""##);
     // A trail: the start page, then the page, then (in the colour tools) the colour edited.
     let page = match state.page {
         Page::Home => "Boldy Mods",
         Page::Block => "Block outline",
         Page::Mob => "Mob hitbox",
         Page::Counter => "Arrow counter",
+        Page::Cps => "CPS counter",
         Page::Zoom => "Zoom",
+        Page::Lighting => "Lighting",
     };
     if state.page.outline() && state.colour_open {
-        out.push_str(if state.page == Page::Mob { "Mob" } else { "Block" });
+        out.push_str(if state.page == Page::Mob {
+            "Mob"
+        } else {
+            "Block"
+        });
         out.push_str(match (state.editing_aim, state.editing_fill) {
             (true, _) => " > Aimed colour",
             (false, true) => " > Fill colour",
@@ -336,13 +395,31 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     flag(out, "block_only_visible", state.page == Page::Block);
     flag(out, "mob_only_visible", state.page == Page::Mob);
     // The panels behind the settings view, which the colour tools replace.
-    flag(out, "block_settings_visible", state.page == Page::Block && !state.colour_open);
-    flag(out, "mob_settings_visible", state.page == Page::Mob && !state.colour_open);
+    flag(
+        out,
+        "block_settings_visible",
+        state.page == Page::Block && !state.colour_open,
+    );
+    flag(
+        out,
+        "mob_settings_visible",
+        state.page == Page::Mob && !state.colour_open,
+    );
     flag(out, "counter_page_visible", state.page == Page::Counter);
+    flag(out, "cps_page_visible", state.page == Page::Cps);
     flag(out, "zoom_page_visible", state.page == Page::Zoom);
+    flag(out, "light_page_visible", state.page == Page::Lighting);
     flag(out, "card_visible", !state.moving);
-    flag(out, "guide_top_visible", state.moving && !state.guide_bottom);
-    flag(out, "guide_bottom_visible", state.moving && state.guide_bottom);
+    flag(
+        out,
+        "guide_top_visible",
+        state.moving && !state.guide_bottom,
+    );
+    flag(
+        out,
+        "guide_bottom_visible",
+        state.moving && state.guide_bottom,
+    );
     let block = state.page == Page::Block;
     let outline = state.page.outline();
     // While the fill follows the line there is no fill colour to pick: the Line colour
