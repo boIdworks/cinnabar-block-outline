@@ -14,7 +14,7 @@ pub(super) fn vector(out: &mut String, values: [f32; 4]) {
 }
 
 /// Appends `value` with at most three decimals, using only integer arithmetic.
-pub(super) fn fixed(out: &mut String, value: f32) {
+pub(crate) fn fixed(out: &mut String, value: f32) {
     let milli = (value * 1000.0).round();
     if !milli.is_finite() {
         out.push('0');
@@ -38,7 +38,7 @@ pub(super) fn fixed(out: &mut String, value: f32) {
     }
 }
 
-pub(super) fn digits(out: &mut String, mut value: u64) {
+pub(crate) fn digits(out: &mut String, mut value: u64) {
     let mut buffer = [0u8; 20];
     let mut at = buffer.len();
     loop {
@@ -55,7 +55,7 @@ pub(super) fn digits(out: &mut String, mut value: u64) {
 }
 
 /// Escapes `text` as a JSON string literal.
-pub(super) fn json_string(text: &str) -> String {
+pub(crate) fn json_string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
     for c in text.chars() {

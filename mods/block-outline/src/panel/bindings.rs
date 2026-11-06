@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// What a key button says while it waits for a key (the menu key cannot be cleared).
+pub(super) const CAPTURE_MENU: &str = "Press key, Esc cancels";
+/// What an unbound key button says.
+pub(super) const KEY_UNSET: &str = "Click to set";
+/// The same for the optional keys, which Backspace or Delete clear.
+pub(super) const CAPTURE_OPTIONAL: &str = "Esc cancels, Del clears";
+
 /// Every surface binding: row captions, fill fractions, toggles, favourites and the preview.
 pub(super) fn bindings(settings: &Settings, seconds: f32, state: MenuState) -> String {
     let mut out = String::with_capacity(1024);
@@ -11,6 +18,19 @@ pub(super) fn bindings(settings: &Settings, seconds: f32, state: MenuState) -> S
 
 pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32, state: MenuState) {
     let toggle = |out: &mut String, name: &str, text: &str, on: bool| {
+        if SWITCHES.contains(&name) {
+            // A switch has no caption to change: its pill colour and knob show the state.
+            out.push_str("\"#");
+            out.push_str(name);
+            out.push_str("_bg\":");
+            vector(out, if on { ACTIVE } else { SWITCH_OFF });
+            out.push_str(",\"#");
+            out.push_str(name);
+            out.push_str("_knob\":[");
+            fixed(out, if on { PILL_W - KNOB - KNOB_OFF } else { KNOB_OFF });
+            out.push_str(",0],");
+            return;
+        }
         out.push_str("\"#");
         out.push_str(name);
         out.push_str("_text\":\"");
@@ -28,6 +48,8 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     let height = card_height(state);
     out.push_str(r##""#card_height":"##);
     fixed(out, height);
+    out.push_str(r##","#card_border_height":"##);
+    fixed(out, height + 2.0);
     out.push_str(r##","#hint_offset":[0,"##);
     fixed(out, height - 16.0);
     out.push_str(r##"],"#options_offset":[0,"##);
@@ -43,6 +65,9 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     out.push_str(
         r##""#hover_visible":false,"#hover_offset":[0,0],"#hover_width":1,"#hover_height":1,"##,
     );
+    // The keyboard focus ring and the bottom line, which shows the focused control's help.
+    focus_bindings(out, state, settings.fill_rgb.is_none());
+    out.push(',');
     for (index, (id, _)) in SLIDERS.iter().enumerate() {
         let (min, max, _) = slider_range(index);
         let value = slider_value(settings, state, index);
@@ -91,30 +116,24 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         },
         settings.pulse,
     );
-    out.push_str(r##""#hide_game_highlight_text":"Game highlight fix: "##);
+    out.push_str(r##""#hide_game_highlight_text":"Hide game highlight: "##);
     if settings.highlight_cancel == 0 {
         out.push_str("Off");
     } else {
         let _ = write!(out, "{}%%", settings.highlight_cancel);
     }
     out.push_str(r##"","#hide_game_highlight_bg":"##);
-    vector(
-        out,
-        if settings.highlight_cancel > 0 {
-            ACTIVE
-        } else {
-            TRACK
-        },
-    );
+    // Neutral, like the other - / + values: the text says Off or the strength.
+    vector(out, TRACK);
     out.push(',');
     let matching = settings.fill_rgb.is_none();
     toggle(
         out,
         "fill_match",
         if matching {
-            "Fill: match line"
+            "Match fill: On"
         } else {
-            "Fill: own colour"
+            "Match fill: Off"
         },
         matching,
     );
@@ -155,12 +174,29 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         out,
         "fullbright_key",
         match (state.capturing_fullbright, &settings.fullbright_key) {
-            (true, _) => "Press a key...",
+            (true, _) => CAPTURE_OPTIONAL,
             (false, Some(key)) => key.display(),
-            (false, None) => "Not set",
+            (false, None) => KEY_UNSET,
         },
         state.capturing_fullbright,
     );
+    // Each reset asks for a second click: the button turns red and says so.
+    for (name, asked, idle) in [
+        ("reset", Reset::Page, "Reset page"),
+        ("counter_reset", Reset::Counter, "Reset place and size"),
+        ("zoom_reset", Reset::Zoom, "Reset zoom"),
+    ] {
+        let asking = state.confirm == asked;
+        out.push_str("\"#");
+        out.push_str(name);
+        out.push_str("_text\":\"");
+        out.push_str(if asking { "Sure? Click again" } else { idle });
+        out.push_str("\",\"#");
+        out.push_str(name);
+        out.push_str("_bg\":");
+        vector(out, if asking { DANGER } else { TRACK });
+        out.push(',');
+    }
     toggle(
         out,
         "show_all_mobs",
@@ -171,19 +207,121 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         },
         settings.show_all_mobs,
     );
+    let counter = settings.counter;
+    toggle(
+        out,
+        "counter",
+        if counter.on {
+            "Arrow counter: On"
+        } else {
+            "Arrow counter: Off"
+        },
+        counter.on,
+    );
+    toggle(
+        out,
+        "counter_bow",
+        if counter.bow_only {
+            "Only with a bow: On"
+        } else {
+            "Only with a bow: Off"
+        },
+        counter.bow_only,
+    );
+    let zoom = settings.zoom;
+    toggle(out, "zoom", if zoom.on { "Zoom: On" } else { "Zoom: Off" }, zoom.on);
+    toggle(
+        out,
+        "zoom_mode",
+        if zoom.toggle { "Mode: Press to toggle" } else { "Mode: Hold the key" },
+        zoom.toggle,
+    );
+    toggle(
+        out,
+        "zoom_scroll",
+        if zoom.scroll {
+            "Scroll zoom: On"
+        } else {
+            "Scroll zoom: Off"
+        },
+        zoom.scroll,
+    );
+    toggle(
+        out,
+        "zoom_sens",
+        if zoom.sensitivity {
+            "Relative sensitivity: On"
+        } else {
+            "Relative sensitivity: Off"
+        },
+        zoom.sensitivity,
+    );
+    toggle(
+        out,
+        "zoom_key",
+        match (state.capturing_zoom, &zoom.key) {
+            (true, _) => CAPTURE_OPTIONAL,
+            (false, Some(key)) => key.display(),
+            (false, None) => KEY_UNSET,
+        },
+        state.capturing_zoom,
+    );
+    let mut text = String::from("Zoom level: ");
+    fixed(&mut text, zoom.level);
+    text.push('x');
+    toggle(out, "zoom_level", &text, false);
+    text = if zoom.time <= 0.0 {
+        String::from("Zoom time: instant")
+    } else {
+        let mut text = String::from("Zoom time: ");
+        fixed(&mut text, zoom.time);
+        text.push('s');
+        text
+    };
+    toggle(out, "zoom_time", &text, false);
+    text = String::from("Scroll step: ");
+    digits(&mut text, u64::from(zoom.step));
+    text.push_str("%%");
+    toggle(out, "zoom_step", &text, false);
+    // A value that is not its default says so, and that clicking it resets it.
+    let defaults = crate::zoom::Zoom::default();
+    for (name, changed) in [
+        ("zoom_level", zoom.level != defaults.level),
+        ("zoom_time", zoom.time != defaults.time),
+        ("zoom_step", zoom.step != defaults.step),
+        ("counter_size", counter.scale != 1.0),
+    ] {
+        out.push_str("\"#");
+        out.push_str(name);
+        out.push_str("_reset\":\"");
+        out.push_str(if changed { "reset" } else { "" });
+        out.push_str("\",");
+    }
+    out.push_str(r##""#open_zoom_color":[0.5,0.85,1,1],"##);
+    out.push_str(r##""#counter_size_text":"Size: "##);
+    digits(out, (counter.scale * 100.0).round().max(0.0) as u64);
+    out.push_str(r##"%%","#counter_size_bg":"##);
+    vector(out, TRACK);
+    // The start page's Arrow counter button: an arrow-shaft brown stripe.
+    out.push_str(r##","#open_counter_color":[0.82,0.68,0.47,1],"##);
     out.push_str(r##""#title_text":""##);
-    out.push_str(match state.page {
-        Page::Home => "Block Outline",
+    // A trail: the start page, then the page, then (in the colour tools) the colour edited.
+    let page = match state.page {
+        Page::Home => "Boldy Mods",
         Page::Block => "Block outline",
         Page::Mob => "Mob hitbox",
-    });
-    // In the colour tools, say which colour is being edited.
-    if state.page != Page::Home && state.colour_open {
+        Page::Counter => "Arrow counter",
+        Page::Zoom => "Zoom",
+    };
+    if state.page.outline() && state.colour_open {
+        out.push_str(if state.page == Page::Mob { "Mob" } else { "Block" });
         out.push_str(match (state.editing_aim, state.editing_fill) {
-            (true, _) => " - aimed colour",
-            (false, true) => " - fill colour",
-            (false, false) => " - line colour",
+            (true, _) => " > Aimed colour",
+            (false, true) => " > Fill colour",
+            (false, false) => " > Line colour",
         });
+    } else {
+        out.push_str(page);
     }
     let page = state.page != Page::Home;
     let flag = |out: &mut String, name: &str, on: bool| {
@@ -197,24 +335,34 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     flag(out, "page_visible", page);
     flag(out, "block_only_visible", state.page == Page::Block);
     flag(out, "mob_only_visible", state.page == Page::Mob);
+    // The panels behind the settings view, which the colour tools replace.
+    flag(out, "block_settings_visible", state.page == Page::Block && !state.colour_open);
+    flag(out, "mob_settings_visible", state.page == Page::Mob && !state.colour_open);
+    flag(out, "counter_page_visible", state.page == Page::Counter);
+    flag(out, "zoom_page_visible", state.page == Page::Zoom);
+    flag(out, "card_visible", !state.moving);
+    flag(out, "guide_top_visible", state.moving && !state.guide_bottom);
+    flag(out, "guide_bottom_visible", state.moving && state.guide_bottom);
+    let block = state.page == Page::Block;
+    let outline = state.page.outline();
     // While the fill follows the line there is no fill colour to pick: the Line colour
     // button stretches over the Fill colour button's place instead.
     // The block page shows Line + Fill colour, or a wide Line & fill colour; the mob page
     // Line colour + Aimed colour.
     out.push_str(r##""#fill_own_visible":"##);
-    out.push_str(if !mob && !matching { "true" } else { "false" });
+    out.push_str(if block && !matching { "true" } else { "false" });
     out.push_str(r##","#fill_match_visible":"##);
-    out.push_str(if !mob && matching { "true" } else { "false" });
+    out.push_str(if block && matching { "true" } else { "false" });
     out.push_str(r##","#mob_top_visible":"##);
     out.push_str(if mob { "true" } else { "false" });
     out.push_str(r##","#colour_visible":"##);
-    out.push_str(if page && state.colour_open {
+    out.push_str(if outline && state.colour_open {
         "true"
     } else {
         "false"
     });
     out.push_str(r##","#settings_visible":"##);
-    out.push_str(if page && !state.colour_open {
+    out.push_str(if outline && !state.colour_open {
         "true"
     } else {
         "false"
@@ -224,7 +372,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         out,
         "menu_key",
         if state.capturing {
-            "Press a key..."
+            CAPTURE_MENU
         } else {
             settings.menu_key.display()
         },

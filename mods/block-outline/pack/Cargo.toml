@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
+description = "Packs Boldy Mods into an installable Cinnabar component"
 publish = false
 
 [dependencies]

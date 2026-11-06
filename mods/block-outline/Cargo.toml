@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
+description = "Boldy Mods: a Cinnabar personal mod that outlines the block or mob you aim at"
 publish = false
 
 [lib]

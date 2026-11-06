@@ -1,15 +1,16 @@
-//! Block outline mod: draws a coloured outline around the block the player is looking at.
+//! Boldy Mods: draws a coloured outline around the block or mob the player is looking at, and an
+//! arrow counter on the HUD.
 //!
 //! Each frame reads the eye pose, samples the selection shapes of the terrain around the player,
 //! raycasts to the targeted block and draws its edges as depth-tested lines. F8 opens a settings
-//! menu for the colour, opacity and thickness; changes save to the mod's settings file.
+//! menu for the colours, sizes and the arrow counter; changes save to the mod's settings file.
 
 use std::cell::{Cell as StdCell, RefCell};
 
 use mod_api::bindings::{
     Guest,
     cinnabar::extension::{
-        budget, environment, gameplay, hud, input, panel as host_panel, player_state,
+        budget, camera, environment, gameplay, hud, input, panel as host_panel, player_state,
         render::{self, Line, LinePattern, Rgba, Vector3},
         settings,
         terrain::{
@@ -21,6 +22,8 @@ use mod_api::bindings::{
 
 use mod_api::drawing::{self, api as draw, shapes};
 
+use crate::counter::{self, Quiver};
+use crate::zoom;
 use crate::outline::{self, Cell, Hit, KeyName, Settings};
 use crate::panel::{self, MenuState};
 
@@ -30,6 +33,11 @@ const NO_LAYER: u16 = u16::MAX;
 const LABEL_SECONDS: f32 = 5.0;
 /// How long the pointer must rest on a control before its help appears.
 const HOVER_SECONDS: f32 = 0.5;
+/// Each nearby actor's box (as `[min, max]` per axis) and whether Cinnabar says its crosshair
+/// would hit it (`None`: unknown).
+type Observed = Vec<(Vec<[f64; 6]>, Option<bool>)>;
+/// A hover lookup: its inputs, the pointer on the card and the control under it.
+type HoverLookup = ((Option<(f32, f32)>, MenuState, bool), Option<[f32; 2]>, Option<usize>);
 
 /// The latest terrain sample and the query that produced it.
 struct Sample {
@@ -136,11 +144,14 @@ thread_local! {
     static FACE_QUADS: RefCell<Vec<draw::Handle>> = const { RefCell::new(Vec::new()) };
     static SECONDS: StdCell<f32> = const { StdCell::new(0.0) };
     static LABEL_UNTIL: StdCell<Option<f32>> = const { StdCell::new(None) };
-    static REPORTED_ERROR: StdCell<bool> = const { StdCell::new(false) };
+    /// A hash of the last problem shown, so each problem is shown once rather than every frame.
+    static REPORTED_ERROR: StdCell<u64> = const { StdCell::new(0) };
+    /// Reading the inventory was refused: the Player status permission is not allowed.
+    static NO_PLAYER_STATUS: StdCell<bool> = const { StdCell::new(false) };
     /// When to next try uploading the cube while it is missing, in accumulated seconds.
     static UPLOAD_RETRY_AT: StdCell<f32> = const { StdCell::new(0.0) };
     /// Unsaved menu state: key capture and whether the colour tools edit the fill.
-    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, editing_fill: false, editing_aim: false, page: panel::Page::Home, colour_open: false, typing: None }) };
+    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, capturing_zoom: false, editing_fill: false, editing_aim: false, page: panel::Page::Home, colour_open: false, typing: None, confirm: panel::Reset::None, focus: None, moving: false, guide_bottom: false }) };
     /// The player's attack keys (`MouseLeft` until read) and the bindings revision they came
     /// from, re-read every `BINDINGS_SECONDS`.
     static ATTACK_KEYS: RefCell<(Option<u64>, Vec<String>)> = const { RefCell::new((None, Vec::new())) };
@@ -156,7 +167,7 @@ thread_local! {
     /// Fuel the last changed terrain region cost per block; unknown until one is read.
     static READ_COST: StdCell<Option<f64>> = const { StdCell::new(None) };
     /// The last actors read, reused by frames with too little fuel left to read them.
-    static LAST_ACTORS: RefCell<Vec<(Vec<[f64; 6]>, Option<bool>)>> = const { RefCell::new(Vec::new()) };
+    static LAST_ACTORS: RefCell<Observed> = const { RefCell::new(Vec::new()) };
     /// This frame already did a costly job (a menu patch or a geometry upload), so a changed
     /// terrain region, the other costly job, waits for the next frame.
     static HEAVY_FRAME: StdCell<bool> = const { StdCell::new(false) };
@@ -167,9 +178,43 @@ thread_local! {
     static HUD_HIDDEN: StdCell<(bool, f32)> = const { StdCell::new((false, f32::NEG_INFINITY)) };
     /// The control under the pointer and when the pointer arrived on it.
     static HOVER: StdCell<Option<(usize, f32)>> = const { StdCell::new(None) };
+    /// When the rainbow preview in the menu was last sent.
+    static PREVIEW_AT: StdCell<f32> = const { StdCell::new(f32::NEG_INFINITY) };
+    /// When a reset button started waiting for its second click.
+    static CONFIRM_AT: StdCell<f32> = const { StdCell::new(0.0) };
+    /// The arrow key being held (1 + its place in `ARROWS`, 0 for none) and when it repeats next.
+    static ARROW_REPEAT: StdCell<(u8, f32)> = const { StdCell::new((0, 0.0)) };
+    /// The last hover lookup: what it was for (pointer, menu state, fill matches line), the
+    /// pointer on the card and the control under it.
+    static HOVER_LOOKUP: StdCell<Option<HoverLookup>> = const { StdCell::new(None) };
     /// The help entry on screen and where, so the box is only updated when it changes.
     static TIP_SHOWN: StdCell<Option<(usize, [f32; 2])>> = const { StdCell::new(None) };
+    /// Whether the arrow counter's HUD layer was published since the mod (re)started.
+    static HUD_PUBLISHED: StdCell<bool> = const { StdCell::new(false) };
+    /// When to try publishing it again after the host refused it (no HUD permission).
+    static HUD_RETRY_AT: StdCell<f32> = const { StdCell::new(0.0) };
+    /// The arrows carried and the inventory they were counted from: its session and equipment
+    /// revision, so the inventory is only read again after it changes.
+    static QUIVER: StdCell<Option<(u64, u64, Quiver)>> = const { StdCell::new(None) };
+    /// What the HUD last showed, so it is only patched when something changes.
+    static COUNTER_SHOWN: StdCell<Option<counter::View>> = const { StdCell::new(None) };
+    /// The last number measured and its width at text scale 1.
+    static COUNT_WIDTH: StdCell<Option<(u32, f32)>> = const { StdCell::new(None) };
+    /// While dragging the counter: where the pointer holds it, from its top-left corner.
+    /// The part being dragged and how.
+    static DRAG: StdCell<Option<(counter::Part, counter::Drag)>> = const { StdCell::new(None) };
+    /// The counter was moved or resized but not saved yet; saved once moving ends.
+    static COUNTER_UNSAVED: StdCell<bool> = const { StdCell::new(false) };
+    /// The zoom's easing state.
+    static ZOOM: StdCell<zoom::Engine> = StdCell::new(zoom::Engine::default());
+    /// Zoom mode "press to toggle": whether the zoom is switched on.
+    static ZOOM_TOGGLED: StdCell<bool> = const { StdCell::new(false) };
+    /// The hotbar slot last seen while zooming, to turn a scroll into zoom steps.
+    static ZOOM_SLOT: StdCell<Option<u8>> = const { StdCell::new(None) };
 }
+
+/// Fuel a frame needs left to read the inventory after it changed; with less, a later frame does.
+const INVENTORY_RESERVE: u64 = 90_000;
 
 /// Mob hitboxes outlined around the player: within this many blocks of the eye, nearest first,
 /// and at most `MAX_MOB_BOXES`, which keeps a crowd inside the frame's fuel.
@@ -231,10 +276,10 @@ impl Guest for BlockOutline {
         reserve_keys(&settings);
         match loaded {
             Ok(_) => show_label(&format!(
-                "Block Outline: press {} for the outline menu",
+                "Boldy Mods: press {} for the menu",
                 settings.menu_key.display()
             )),
-            Err(error) => show_label(&format!("Block Outline: settings unavailable ({error})")),
+            Err(error) => show_label(&format!("Boldy Mods: settings unavailable ({error})")),
         }
     }
 
@@ -267,7 +312,7 @@ impl Guest for BlockOutline {
                 host_panel::update_content(&panel::update(&settings, seconds, state))
             {
                 show_label(&format!(
-                    "Block Outline: allow the Controls permission for the menu ({error})"
+                    "Boldy Mods: allow the Controls permission for the menu ({error})"
                 ));
             }
         }
@@ -291,6 +336,7 @@ impl Guest for BlockOutline {
         if let Some(controls) = &controls {
             handle_menu_key(controls, seconds);
             back_to_start_when_closed(controls, seconds);
+            expire_confirm(seconds);
             hover_help(controls, seconds);
             // Committed hex codes arrive separately from the numeric control events.
             let text = if menu_open {
@@ -300,8 +346,15 @@ impl Guest for BlockOutline {
             };
             apply_menu_events(controls, &text, seconds);
         }
+        // Before the early returns below: the host keeps the counter on screen, patched here.
+        arrow_counter(controls.as_ref(), seconds);
+        zoom_frame(controls.as_ref(), delta);
         let settings = SETTINGS.with(StdCell::get);
-        if menu_open && (settings.rainbow || settings.mob.rainbow) {
+        if menu_open
+            && (settings.rainbow || settings.mob.rainbow)
+            && seconds - PREVIEW_AT.with(StdCell::get) >= PREVIEW_SECONDS
+        {
+            PREVIEW_AT.with(|at| at.set(seconds));
             let state = MENU.with(StdCell::get);
             let _ = host_panel::update_content(&panel::preview_update(&settings, seconds, state));
         }
@@ -330,89 +383,17 @@ impl Guest for BlockOutline {
             // Cinnabar says which actor its crosshair would hit (attack reach, blocks in the
             // way); use that when known, so a mob is only aimed when it can really be hit.
             let native_aim = observed.iter().any(|(_, hittable)| hittable.is_some());
-            let aimed_actor: Vec<Vec<[f64; 6]>> = observed
-                .iter()
-                .filter(|(_, hittable)| *hittable == Some(true))
-                .map(|(boxes, _)| boxes.clone())
-                .take(1)
-                .collect();
+            let aimed = observed.iter().position(|(_, hittable)| *hittable == Some(true));
             let actors: Vec<Vec<[f64; 6]>> = observed.into_iter().map(|(boxes, _)| boxes).collect();
-            let hit = SAMPLE
-                .with(|sample| {
-                    let sample = sample.borrow();
-                    // After a dimension change or reconnect the last sample describes another world
-                    // until the new one arrives; outlining from it would show phantom blocks.
-                    let sample = sample.as_ref().filter(|sample| {
-                        sample.frame_session == frame.session
-                            && sample.stamp.dimension == frame.dimension
-                    })?;
-                    if native_aim {
-                        // The aimed actor, wherever it is; otherwise blocks only.
-                        if let Some(boxes) = aimed_actor.first() {
-                            let mut min = [f64::INFINITY; 3];
-                            let mut max = [f64::NEG_INFINITY; 3];
-                            for b in boxes {
-                                for axis in 0..3 {
-                                    min[axis] = min[axis].min(b[axis]);
-                                    max[axis] = max[axis].max(b[axis + 3]);
-                                }
-                            }
-                            if min[0].is_finite() {
-                                return Some(outline::Target::Actor(Hit {
-                                    block: [0; 3],
-                                    min,
-                                    max,
-                                    distance: 0.0,
-                                    direct: false,
-                                    boxes: outline::Boxes::single(min, max),
-                                }));
-                            }
-                        }
-                        return outline::target_with_actors(
-                            eye,
-                            dir,
-                            f64::from(settings.reach),
-                            |block| cell_at(sample, block),
-                            &[],
-                        );
-                    }
-                    outline::target_with_actors(
-                        eye,
-                        dir,
-                        f64::from(settings.reach),
-                        |block| cell_at(sample, block),
-                        &actors,
-                    )
-                })
-                .map(|target| match target {
-                    outline::Target::Block(hit) => (hit, false),
-                    outline::Target::Actor(hit) => (hit, true),
-                });
-            // While the blocks for a new view are still loading (a frame or two after a big
-            // turn), keep the last block outlined rather than flicker off.
-            let hit = hit.or_else(|| {
-                let covered = SAMPLE.with(|sample| {
-                    sample.borrow().as_ref().is_some_and(|sample| {
-                        let max = [0, 1, 2].map(|a| sample.min[a] + sample.size[a]);
-                        outline::region_covers(
-                            (sample.min, max),
-                            eye,
-                            dir,
-                            f64::from(settings.reach),
-                        )
-                    })
-                });
-                if covered {
-                    return None;
-                }
-                LAST_HIT.with(|last| {
-                    last.borrow()
-                        .as_ref()
-                        .filter(|last| last.dimension == frame.dimension)
-                        .and_then(|last| last.hit)
-                        .filter(|(_, actor)| !actor)
-                })
-            });
+            let hit = aimed_target(
+                frame.session,
+                frame.dimension,
+                [eye, dir],
+                settings.reach,
+                native_aim.then(|| aimed.map(|index| actors[index].as_slice())),
+                &actors,
+            )
+            .or_else(|| last_block_while_loading(eye, dir, settings.reach, frame.dimension));
             let camera = gameplay::read_camera().ok().flatten().map_or(eye, |pose| {
                 [
                     f64::from(pose.position.x),
@@ -454,11 +435,100 @@ impl Guest for BlockOutline {
     }
 }
 
+/// What the crosshair is on this frame, from the last terrain sample, and whether it is a mob
+/// (`true`) or a block. `aimed` is `Some` when Cinnabar says which actor it would hit (the boxes
+/// of that actor, or `None` for none); without it every actor in `actors` can be the target.
+fn aimed_target(
+    session: u64,
+    dimension: i32,
+    [eye, dir]: [[f64; 3]; 2],
+    reach: f32,
+    aimed: Option<Option<&[[f64; 6]]>>,
+    actors: &[Vec<[f64; 6]>],
+) -> Option<(Hit, bool)> {
+    let target = SAMPLE.with(|sample| {
+        let sample = sample.borrow();
+        // After a dimension change or reconnect the last sample describes another world until
+        // the new one arrives; outlining from it would show phantom blocks.
+        let sample = sample
+            .as_ref()
+            .filter(|sample| sample.frame_session == session && sample.stamp.dimension == dimension)?;
+        let lookup = |block| cell_at(sample, block);
+        let reach = f64::from(reach);
+        match aimed {
+            // The aimed actor, wherever it is; otherwise blocks only.
+            Some(aimed) => {
+                if let Some(bounds) = aimed.and_then(bounds_of) {
+                    return Some(outline::Target::Actor(Hit {
+                        block: [0; 3],
+                        min: bounds.0,
+                        max: bounds.1,
+                        distance: 0.0,
+                        direct: false,
+                        boxes: outline::Boxes::single(bounds.0, bounds.1),
+                    }));
+                }
+                outline::target_with_actors(eye, dir, reach, lookup, &[])
+            }
+            None => outline::target_with_actors(eye, dir, reach, lookup, actors),
+        }
+    })?;
+    Some(match target {
+        outline::Target::Block(hit) => (hit, false),
+        outline::Target::Actor(hit) => (hit, true),
+    })
+}
+
+/// The box around all of `boxes`, `None` when there are none.
+fn bounds_of(boxes: &[[f64; 6]]) -> Option<([f64; 3], [f64; 3])> {
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for b in boxes {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(b[axis]);
+            max[axis] = max[axis].max(b[axis + 3]);
+        }
+    }
+    min[0].is_finite().then_some((min, max))
+}
+
+/// While the blocks for a new view are still loading (a frame or two after a big turn), the last
+/// block that was outlined, rather than a flicker off. `None` once the view is covered by the
+/// sample (nothing is there) or when the last target was a mob.
+fn last_block_while_loading(
+    eye: [f64; 3],
+    dir: [f64; 3],
+    reach: f32,
+    dimension: i32,
+) -> Option<(Hit, bool)> {
+    let covered = SAMPLE.with(|sample| {
+        sample.borrow().as_ref().is_some_and(|sample| {
+            let max = [0, 1, 2].map(|a| sample.min[a] + sample.size[a]);
+            outline::region_covers((sample.min, max), eye, dir, f64::from(reach))
+        })
+    });
+    if covered {
+        return None;
+    }
+    LAST_HIT.with(|last| {
+        last.borrow()
+            .as_ref()
+            .filter(|last| last.dimension == dimension)
+            .and_then(|last| last.hit)
+            .filter(|(_, actor)| !actor)
+    })
+}
+
 /// The menu opens on its start page: once closed, forget the page that was shown.
 fn back_to_start_when_closed(controls: &input::Controls, seconds: f32) {
     let state = MENU.with(StdCell::get);
     if controls.panel_open
-        || (state.page == panel::Page::Home && !state.colour_open && state.typing.is_none())
+        || (state.page == panel::Page::Home
+            && !state.colour_open
+            && state.typing.is_none()
+            && state.confirm == panel::Reset::None
+            && state.focus.is_none()
+            && !state.moving)
     {
         return;
     }
@@ -468,33 +538,35 @@ fn back_to_start_when_closed(controls: &input::Controls, seconds: f32) {
         editing_fill: false,
         editing_aim: false,
         typing: None,
+        confirm: panel::Reset::None,
+        focus: None,
+        moving: false,
         ..state
     };
     MENU.with(|m| m.set(state));
-    let settings = SETTINGS.with(StdCell::get);
-    HEAVY_FRAME.with(|heavy| heavy.set(true));
-    let _ = host_panel::update_content(&panel::update(&settings, seconds, state));
+    push_menu(seconds, state);
 }
 
 /// Captures a new menu key while the "Menu key" button waits for one; otherwise opens or closes
 /// the menu when the chosen key is pressed. The panel's own toggle key is a placeholder, because
 /// a panel cannot change its toggle key after loading.
 fn handle_menu_key(controls: &input::Controls, seconds: f32) {
-    if MENU.with(StdCell::get).capturing_fullbright {
-        capture_fullbright_key(controls, seconds);
+    let state = MENU.with(StdCell::get);
+    if state.capturing_fullbright {
+        capture_optional_key(KeyButton::Fullbright, controls, seconds);
         return;
     }
-    if MENU.with(StdCell::get).capturing {
+    if state.capturing_zoom {
+        capture_optional_key(KeyButton::Zoom, controls, seconds);
+        return;
+    }
+    if state.capturing {
         if !controls.panel_open {
             // The menu closed mid-capture; keep the old key.
-            set_capturing(false, seconds);
+            set_capturing(KeyButton::Menu, false, seconds);
             return;
         }
-        let Some(key) = controls
-            .keys_pressed
-            .iter()
-            .find(|key| !key.starts_with("Mouse"))
-        else {
+        let Some(key) = controls.keys_pressed.iter().find(|key| !key.starts_with("Mouse")) else {
             return;
         };
         if key != "Escape"
@@ -503,73 +575,137 @@ fn handle_menu_key(controls: &input::Controls, seconds: f32) {
             let mut settings = SETTINGS.with(StdCell::get);
             settings.menu_key = name;
             SETTINGS.with(|s| s.set(settings));
-            if let Err(error) = settings::save(&settings.to_json()) {
-                report_once(&format!("Block Outline: settings not saved ({error})"));
-            }
+            save_settings(&settings);
             reserve_keys(&settings);
         }
-        set_capturing(false, seconds);
+        set_capturing(KeyButton::Menu, false, seconds);
         return;
     }
-    if MENU.with(StdCell::get).typing.is_some() {
-        // Keys are being typed into a box; the menu key must not close the menu.
+    // Keys are being typed into a box: the menu key must not close the menu.
+    if state.typing.is_some() {
         return;
     }
     toggle_fullbright_by_key(controls);
+    if !controls.focused {
+        return;
+    }
     let key = SETTINGS.with(StdCell::get).menu_key;
-    if !controls.focused
-        || !controls
-            .keys_pressed
-            .iter()
-            .any(|pressed| pressed == key.as_str())
-    {
+    if !controls.keys_pressed.iter().any(|pressed| pressed == key.as_str()) {
         return;
     }
     if controls.panel_open {
-        let _ = host_panel::set_open(false);
-    } else if controls.gameplay {
-        if let Err(error) = host_panel::set_open(true) {
-            report_once(&format!("Block Outline: menu unavailable ({error})"));
-        }
+        let _ = host_panel::close();
+    } else if controls.gameplay
+        && let Err(error) = host_panel::open()
+    {
+        report_once(&format!("Boldy Mods: menu unavailable ({error})"));
     }
 }
 
-/// Starts or ends waiting for a new menu key and redraws the button for it.
-fn set_capturing(capturing: bool, seconds: f32) {
+/// Saves `settings`, telling the player once if that fails.
+fn save_settings(settings: &Settings) {
+    if let Err(error) = settings::save(&settings.to_json()) {
+        report_once(&format!("Boldy Mods: settings not saved ({error})"));
+    }
+}
+
+/// Sends the menu for `state` to the host. A frame that did this is a heavy one, which leaves the
+/// terrain read for the next. A failure is ignored: the menu may just have closed.
+fn push_menu(seconds: f32, state: MenuState) {
+    push_menu_with(seconds, &SETTINGS.with(StdCell::get), state, false);
+}
+
+/// [`push_menu`] for `settings`, telling the player once when `report` and the host refused.
+fn push_menu_with(seconds: f32, settings: &Settings, state: MenuState, report: bool) {
+    HEAVY_FRAME.with(|heavy| heavy.set(true));
+    if let Err(error) = host_panel::update_content(&panel::update(settings, seconds, state))
+        && report
+    {
+        report_once(&format!("Boldy Mods: menu update failed ({error})"));
+    }
+}
+
+/// The three buttons that wait for a key.
+#[derive(Clone, Copy, PartialEq)]
+enum KeyButton {
+    Menu,
+    Fullbright,
+    Zoom,
+}
+
+/// Starts or ends waiting for a new key on `button` and redraws the menu for it.
+fn set_capturing(button: KeyButton, capturing: bool, seconds: f32) {
     let state = MENU.with(|menu| {
         let mut state = menu.get();
-        state.capturing = capturing;
+        match button {
+            KeyButton::Menu => state.capturing = capturing,
+            KeyButton::Fullbright => state.capturing_fullbright = capturing,
+            KeyButton::Zoom => state.capturing_zoom = capturing,
+        }
         menu.set(state);
         state
     });
-    let settings = SETTINGS.with(StdCell::get);
-    HEAVY_FRAME.with(|heavy| heavy.set(true));
-    if let Err(error) = host_panel::update_content(&panel::update(&settings, seconds, state)) {
-        report_once(&format!("Block Outline: menu update failed ({error})"));
+    push_menu(seconds, state);
+}
+
+/// Waits for the new key of an optional key button (Fullbright or Zoom): Backspace or Delete
+/// unbinds it, Escape cancels, the menu key is refused (the old key stays), any other key becomes
+/// the key.
+fn capture_optional_key(button: KeyButton, controls: &input::Controls, seconds: f32) {
+    if !controls.panel_open {
+        set_capturing(button, false, seconds);
+        return;
     }
+    let mut settings = SETTINGS.with(StdCell::get);
+    let key = match button {
+        KeyButton::Zoom => &mut settings.zoom.key,
+        _ => &mut settings.fullbright_key,
+    };
+    let Some(chosen) = zoom::captured_key(&controls.keys_pressed, *key, settings.menu_key) else {
+        return;
+    };
+    if chosen != *key {
+        *key = chosen;
+        SETTINGS.with(|s| s.set(settings));
+        save_settings(&settings);
+        reserve_keys(&settings);
+    }
+    set_capturing(button, false, seconds);
 }
 
 /// Shows a short explanation next to the pointer once it has rested on a control for
 /// `HOVER_SECONDS`, and hides it when the pointer moves off or the menu closes.
 fn hover_help(controls: &input::Controls, seconds: f32) {
-    // Positions depend on whether the colour tools widen the card.
+    // In gameplay, which is most of the time, there is nothing to look up or to hide.
+    if !controls.panel_open
+        && HOVER.with(StdCell::get).is_none()
+        && TIP_SHOWN.with(StdCell::get).is_none()
+    {
+        return;
+    }
     let state = MENU.with(StdCell::get);
-    let open = state.colour_open;
     let matching = panel::fill_matches(&SETTINGS.with(StdCell::get), state);
-    let point = controls
-        .pointer
-        .filter(|_| controls.panel_open && !MENU.with(StdCell::get).capturing)
-        .and_then(|(x, y)| {
-            let layout = host_panel::read_layout()?;
-            panel::card_point(
-                [x, y],
-                [layout.width, layout.height],
-                [layout.offset.0, layout.offset.1],
-                layout.scale,
-                open,
-            )
-        });
-    let under = point.and_then(|point| panel::tip_at(point, state, matching));
+    // Which control the pointer is on only changes when the pointer, the menu's state or the
+    // fill's mode do, so the host's layout is not read again while the pointer rests.
+    let lookup = (controls.pointer.filter(|_| controls.panel_open && !state.capturing), state, matching);
+    let cached = HOVER_LOOKUP.with(StdCell::get);
+    let (point, under) = match cached {
+        Some((key, point, under)) if key == lookup => (point, under),
+        _ => {
+            let point = lookup.0.and_then(|(x, y)| {
+                let layout = host_panel::read_layout()?;
+                panel::card_point(
+                    [x, y],
+                    [layout.width, layout.height],
+                    [layout.offset.0, layout.offset.1],
+                    layout.scale,
+                )
+            });
+            let under = point.and_then(|point| panel::tip_at(point, state, matching));
+            HOVER_LOOKUP.with(|last| last.set(Some((lookup, point, under))));
+            (point, under)
+        }
+    };
     // The highlight follows the pointer at once; the help text waits for a short rest.
     if HOVER.with(StdCell::get).map(|(index, _)| index) != under {
         let _ = host_panel::update_content(&panel::highlight_update(under, state, matching));
@@ -599,7 +735,55 @@ fn hover_help(controls: &input::Controls, seconds: f32) {
     }
 }
 
-/// Applies the menu's control events, then saves and refreshes the menu once if anything changed.
+/// How often the menu's rainbow swatches are sent a new colour: smooth enough at twenty a second.
+const PREVIEW_SECONDS: f32 = 0.05;
+
+/// The arrow keys, in the order `ARROW_REPEAT` counts them.
+const ARROWS: [&str; 4] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+/// A held arrow key repeats after this many seconds, then every `ARROW_REPEAT_EVERY`.
+const ARROW_REPEAT_DELAY: f32 = 0.4;
+const ARROW_REPEAT_EVERY: f32 = 0.06;
+
+/// The arrow key to act on again because it is being held. The host only sends a key's first
+/// press, so holding Left or Right on a slider would otherwise move it once.
+fn arrow_repeat(controls: &input::Controls, seconds: f32) -> Option<&'static str> {
+    let Some(held) = ARROWS
+        .iter()
+        .position(|arrow| controls.keys_held.iter().any(|key| key == arrow))
+    else {
+        ARROW_REPEAT.with(|repeat| repeat.set((0, 0.0)));
+        return None;
+    };
+    let tag = held as u8 + 1;
+    let (current, next) = ARROW_REPEAT.with(StdCell::get);
+    let fresh = controls.keys_pressed.iter().any(|key| key == ARROWS[held]);
+    if fresh || current != tag {
+        // A new press already counts once; the repeat starts after a short wait.
+        ARROW_REPEAT.with(|repeat| repeat.set((tag, seconds + ARROW_REPEAT_DELAY)));
+        return None;
+    }
+    if seconds < next {
+        return None;
+    }
+    ARROW_REPEAT.with(|repeat| repeat.set((tag, seconds + ARROW_REPEAT_EVERY)));
+    Some(ARROWS[held])
+}
+
+/// Takes back a reset button's "Sure? Click again" once `CONFIRM_SECONDS` have passed.
+fn expire_confirm(seconds: f32) {
+    let mut state = MENU.with(StdCell::get);
+    if state.confirm == panel::Reset::None
+        || seconds - CONFIRM_AT.with(StdCell::get) < panel::CONFIRM_SECONDS
+    {
+        return;
+    }
+    state.confirm = panel::Reset::None;
+    MENU.with(|menu| menu.set(state));
+    push_menu(seconds, state);
+}
+
+/// Applies the menu's control events and key presses, then saves and refreshes the menu once if
+/// anything changed.
 fn apply_menu_events(controls: &input::Controls, text: &[input::TextEvent], seconds: f32) {
     let events = &controls.events;
     let mut state = MENU.with(StdCell::get);
@@ -608,11 +792,21 @@ fn apply_menu_events(controls: &input::Controls, text: &[input::TextEvent], seco
         state.typing = None;
         MENU.with(|menu| menu.set(state));
     }
+    if !controls.panel_open && events.is_empty() && text.is_empty() {
+        return;
+    }
     let typing = state.typing.is_some() && !state.capturing;
-    if events.is_empty() && text.is_empty() && !(typing && !controls.keys_pressed.is_empty()) {
+    // The keys that count this frame: those pressed, and an arrow key that is being held.
+    let mut pressed = controls.keys_pressed.clone();
+    if controls.panel_open && !typing {
+        pressed.extend(arrow_repeat(controls, seconds).map(str::to_owned));
+    }
+    let keys = controls.panel_open && !pressed.is_empty();
+    if events.is_empty() && text.is_empty() && !keys {
         return;
     }
     let before = SETTINGS.with(StdCell::get);
+    let confirm_before = state.confirm;
     let mut settings = before;
     // A rejected hex code still refreshes the menu, putting the field back to the current code.
     let mut refresh = false;
@@ -623,25 +817,44 @@ fn apply_menu_events(controls: &input::Controls, text: &[input::TextEvent], seco
             refresh |= panel::type_key(&mut settings, &mut state, key);
         }
     }
-    for event in events {
-        if event.id == "close" {
-            // The X button: the menu's state resets to the start page once it has closed.
-            let _ = host_panel::set_open(false);
-            continue;
+    // A click puts the keyboard focus away; otherwise the keys move or press the focused control.
+    let mut queue: Vec<(String, f32)> = Vec::new();
+    let mut moved = false;
+    if !events.is_empty() && state.focus.take().is_some() {
+        refresh = true;
+    }
+    if keys && !typing {
+        let shift = controls
+            .keys_held
+            .iter()
+            .any(|key| key == "ShiftLeft" || key == "ShiftRight");
+        let keyed = panel::keys(&settings, &mut state, &pressed, shift);
+        queue = keyed.events;
+        moved = keyed.moved;
+        refresh |= keyed.redraw;
+    }
+    queue.extend(events.iter().map(|event| (event.id.clone(), event.value)));
+    for (id, value) in &queue {
+        match id.as_str() {
+            "close" => {
+                // The X button: the menu's state resets to the start page once it has closed.
+                let _ = host_panel::close();
+            }
+            // A key button: wait for the next key press.
+            id @ ("zoom_key" | "fullbright_key" | "menu_key") => {
+                let button = match id {
+                    "zoom_key" => KeyButton::Zoom,
+                    "fullbright_key" => KeyButton::Fullbright,
+                    _ => KeyButton::Menu,
+                };
+                set_capturing(button, true, seconds);
+                state = MENU.with(StdCell::get);
+            }
+            _ => refresh |= panel::apply(&mut settings, &mut state, id, *value),
         }
-        if event.id == "fullbright_key" {
-            // The "Light key" button: wait for the next key press.
-            set_capturing_fullbright(true, seconds);
-            state = MENU.with(StdCell::get);
-            continue;
-        }
-        if event.id == "menu_key" {
-            // The "Menu key" button: wait for the next key press.
-            set_capturing(true, seconds);
-            state = MENU.with(StdCell::get);
-            continue;
-        }
-        refresh |= panel::apply(&mut settings, &mut state, &event.id, event.value);
+    }
+    if state.confirm != panel::Reset::None && state.confirm != confirm_before {
+        CONFIRM_AT.with(|at| at.set(seconds));
     }
     for event in text {
         match panel::apply_text(&mut settings, state, &event.id, &event.value) {
@@ -652,22 +865,364 @@ fn apply_menu_events(controls: &input::Controls, text: &[input::TextEvent], seco
     MENU.with(|menu| menu.set(state));
     let changed = settings != before;
     if !changed && !refresh {
+        if moved {
+            // Only the focus ring moved: a small patch is enough.
+            let matching = panel::fill_matches(&settings, state);
+            let _ = host_panel::update_content(&panel::focus_update(state, matching));
+        }
         return;
     }
     if changed {
         SETTINGS.with(|s| s.set(settings));
-        if let Err(error) = settings::save(&settings.to_json()) {
-            report_once(&format!("Block Outline: settings not saved ({error})"));
+        if settings.zoom != before.zoom {
+            // The zoom key is reserved only while the zoom is on.
+            reserve_keys(&settings);
         }
+        save_settings(&settings);
     }
-    HEAVY_FRAME.with(|heavy| heavy.set(true));
-    if let Err(error) = host_panel::update_content(&panel::update(&settings, seconds, state)) {
-        report_once(&format!("Block Outline: menu update failed ({error})"));
-    }
+    push_menu_with(seconds, &settings, state, true);
     // The update hid the highlight and help; forget them so the next frame shows them again
     // where they now belong (opening the colour tools moves every settings control).
     HOVER.with(|h| h.set(None));
     TIP_SHOWN.with(|t| t.set(None));
+}
+
+/// How long to wait before publishing the HUD layer again after the host refused it.
+const HUD_RETRY_SECONDS: f32 = 5.0;
+
+/// Keeps the HUD arrow counter up to date: publishes its layer, recounts the arrows after the
+/// inventory changes, lets the player drag and resize it while moving, and patches the HUD only
+/// when what it shows changed.
+fn arrow_counter(controls: Option<&input::Controls>, seconds: f32) {
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        if seconds < HUD_RETRY_AT.with(StdCell::get) {
+            return;
+        }
+        COUNTER_SHOWN.with(|shown| shown.set(None));
+        if let Err(error) = hud::set_surface(&counter::surface()) {
+            HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+            if SETTINGS.with(StdCell::get).counter.on {
+                report_once(&format!(
+                    "Boldy Mods: allow the HUD permission for the arrow counter ({error})"
+                ));
+            }
+            return;
+        }
+        HUD_PUBLISHED.with(|published| published.set(true));
+    }
+    let state = MENU.with(StdCell::get);
+    let panel_open = controls.is_some_and(|c| c.panel_open);
+    let moving = state.moving && panel_open;
+    let viewport = hud::read_viewport().map(|v| [v.width, v.height]);
+    let mut settings = SETTINGS.with(StdCell::get);
+    if settings.counter.on {
+        refresh_quiver();
+    }
+    let quiver = QUIVER.with(StdCell::get).map(|(_, _, quiver)| quiver);
+    let arrows = quiver.map_or(0, |quiver| quiver.arrows);
+    let text_width = count_width(arrows);
+    let mut edit = counter::Edit::default();
+    if let (true, Some(controls), Some(viewport)) = (moving, controls, viewport) {
+        edit = drag_counter(controls, &mut settings, viewport, text_width, seconds);
+    }
+    // A moved counter is saved once, when moving ends, not on every step of a drag.
+    let moving = MENU.with(StdCell::get).moving && panel_open;
+    if !moving && COUNTER_UNSAVED.with(StdCell::get) {
+        COUNTER_UNSAVED.with(|unsaved| unsaved.set(false));
+        DRAG.with(|drag| drag.set(None));
+        save_settings(&settings);
+    }
+    let counter = settings.counter;
+    let on_page = panel_open && state.page == panel::Page::Counter;
+    let holding = || {
+        !counter.bow_only
+            || quiver.is_some_and(|quiver| {
+                let selected = player_state::read_selected_slot()
+                    .ok()
+                    .flatten()
+                    .map(|selected| selected.slot);
+                quiver.holding_bow(selected)
+            })
+    };
+    // Without the Player status permission the count is unknown: show a ? so the counter can
+    // still be found and placed, and the reason is clear.
+    let unknown = quiver.is_none() && NO_PLAYER_STATUS.with(StdCell::get);
+    let visible = counter.on
+        && (quiver.is_some() || unknown)
+        && (on_page || moving || unknown || holding());
+    let view = match viewport.filter(|_| visible) {
+        Some(viewport) => {
+            let size = counter::size(counter.scale, text_width);
+            counter::View {
+                visible: true,
+                arrows: (!unknown).then_some(arrows),
+                offset: counter::place(counter.pos, size, viewport),
+                size,
+                scale: counter.scale,
+                text_width,
+                edit: moving.then_some(edit),
+            }
+        }
+        None => counter::View {
+            visible: false,
+            arrows: Some(0),
+            offset: [0.0; 2],
+            size: [0.0; 2],
+            scale: 1.0,
+            text_width: 0.0,
+            edit: None,
+        },
+    };
+    let shown = COUNTER_SHOWN.with(StdCell::get);
+    // Hidden is hidden, whatever it would have shown.
+    if shown.is_some_and(|shown| shown == view || (!shown.visible && !view.visible)) {
+        return;
+    }
+    match hud::update_surface(&counter::patch(&view)) {
+        Ok(()) => COUNTER_SHOWN.with(|s| s.set(Some(view))),
+        Err(error) => {
+            // The layer is gone (or was refused): publish it again later.
+            HUD_PUBLISHED.with(|published| published.set(false));
+            HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+            report_once(&format!("Boldy Mods: arrow counter failed ({error})"));
+        }
+    }
+}
+
+/// Recounts the arrows when the inventory changed since they were last counted. The equipment
+/// revision is a cheap check every frame; the inventory itself is only read after a change and
+/// with enough fuel left, otherwise in a later frame.
+fn refresh_quiver() {
+    let revisions = match player_state::read_revisions() {
+        Ok(Some(revisions)) => revisions,
+        Ok(None) => {
+            // Not in a world.
+            QUIVER.with(|q| q.set(None));
+            return;
+        }
+        Err(_) => {
+            // Shown on the counter itself as a yellow ?, with this message once.
+            if !NO_PLAYER_STATUS.with(|n| n.replace(true)) {
+                show_label("Boldy Mods: allow the Player status permission (Mods tab) to count arrows");
+            }
+            QUIVER.with(|q| q.set(None));
+            return;
+        }
+    };
+    NO_PLAYER_STATUS.with(|n| n.set(false));
+    let known = QUIVER.with(StdCell::get);
+    if known.is_some_and(|(session, revision, _)| {
+        session == revisions.session && revision == revisions.equipment
+    }) {
+        return;
+    }
+    if budget::remaining_fuel() < INVENTORY_RESERVE {
+        return;
+    }
+    HEAVY_FRAME.with(|heavy| heavy.set(true));
+    let counted = crate::arena::scratch(player_state::read_equipment, |equipment| {
+        let Ok(Some(equipment)) = equipment else {
+            return None;
+        };
+        fn cell(slot: &player_state::Slot) -> Option<(&str, u16)> {
+            let item = slot.item.as_ref()?;
+            Some((item.identifier.as_deref()?, item.count))
+        }
+        Some(Quiver::count(
+            equipment.inventory.iter().map(cell),
+            cell(&equipment.offhand),
+        ))
+    });
+    // Keyed by the revision checked above: a change since then is caught next frame.
+    QUIVER.with(|q| {
+        q.set(counted.map(|quiver| (revisions.session, revisions.equipment, quiver)))
+    });
+}
+
+/// Width of `arrows` written out, at text scale 1, measured once per new number.
+fn count_width(arrows: u32) -> f32 {
+    if let Some((known, width)) = COUNT_WIDTH.with(StdCell::get)
+        && known == arrows
+    {
+        return width;
+    }
+    let mut text = String::new();
+    crate::panel::digits(&mut text, u64::from(arrows));
+    let width = hud::measure_text(&text, hud::Font::Native)
+        .ok()
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .unwrap_or_else(|| counter::guess_width(counter::digits(arrows)));
+    COUNT_WIDTH.with(|w| w.set(Some((arrows, width))));
+    width
+}
+
+/// While moving, with the mouse alone: dragging the counter moves it, dragging any corner
+/// handle resizes it with the opposite corner still, both snapping to the hotbar and the
+/// screen's middle and edges; the frame lights up under the pointer. The wheel and + / - also resize; Enter, Escape
+/// or the right button finish. Returns how the edit frame should look.
+fn drag_counter(
+    controls: &input::Controls,
+    settings: &mut Settings,
+    viewport: [f32; 2],
+    text_width: f32,
+    seconds: f32,
+) -> counter::Edit {
+    let before = settings.counter;
+    let counter = &mut settings.counter;
+    let pressed = |key: &str| controls.keys_pressed.iter().any(|k| k == key);
+    let size = counter::size(counter.scale, text_width);
+    let corner = counter::place(counter.pos, size, viewport);
+    let mut edit = counter::Edit::default();
+    if let Some((x, y)) = controls.pointer {
+        let pointer = [x, y];
+        let over = counter::hit(pointer, corner, size);
+        if pressed("MouseLeft")
+            && let Some(part) = over
+        {
+            let drag = counter::start_drag(part, pointer, corner, size);
+            DRAG.with(|d| d.set(Some((part, drag))));
+        }
+        if !controls.keys_held.iter().any(|k| k == "MouseLeft") {
+            DRAG.with(|d| d.set(None));
+        }
+        match DRAG.with(StdCell::get) {
+            Some((part, drag)) => {
+                let (scale, at, guides) =
+                    counter::drag_to(drag, pointer, counter.scale, text_width, viewport);
+                counter.scale = scale;
+                counter.pos = counter::centre(at, counter::size(scale, text_width), viewport);
+                edit.guides = guides;
+                edit.dragging = Some(part);
+            }
+            None => edit.hover = over,
+        }
+    }
+    if edit.dragging.is_none() {
+        let mut steps = 0.0;
+        if controls.wheel.is_finite() && controls.wheel != 0.0 {
+            steps += controls.wheel.signum();
+        }
+        for key in &controls.keys_pressed {
+            match key.as_str() {
+                "Equal" | "NumpadAdd" => steps += 1.0,
+                "Minus" | "NumpadSubtract" => steps -= 1.0,
+                _ => {}
+            }
+        }
+        if steps != 0.0 {
+            counter.scale = counter::Counter::stepped(counter.scale, steps);
+        }
+    }
+    let size = counter::size(counter.scale, text_width);
+    let corner = counter::place(counter.pos, size, viewport);
+    edit.label_above = counter::label_above(corner, size, viewport);
+    let guide_bottom = counter.pos[1] < 0.3;
+    if settings.counter != before {
+        SETTINGS.with(|s| s.set(*settings));
+        COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
+    }
+    let mut state = MENU.with(StdCell::get);
+    if ["Escape", "Enter", "NumpadEnter", "MouseRight"]
+        .iter()
+        .any(|key| pressed(key))
+    {
+        state.moving = false;
+        MENU.with(|menu| menu.set(state));
+        DRAG.with(|d| d.set(None));
+        push_menu_with(seconds, settings, state, true);
+    } else if state.guide_bottom != guide_bottom {
+        // Keep the guide away from the counter: at the bottom while it is near the top.
+        state.guide_bottom = guide_bottom;
+        MENU.with(|menu| menu.set(state));
+        let _ = host_panel::update_content(&panel::guide_update(state));
+    }
+    edit
+}
+
+/// The zoom, once per frame: the zoom key (held, or pressed to toggle) narrows the view with an
+/// ease, scrolling (read from the hotbar slot moving) or the = and - keys change how far, and
+/// the camera is asked for the view and look scales every frame it is zoomed; omitting them
+/// restores the normal view. Works only in focused gameplay with no menu open.
+fn zoom_frame(controls: Option<&input::Controls>, delta: f32) {
+    let zoom = SETTINGS.with(StdCell::get).zoom;
+    let gameplay = controls.is_some_and(|c| c.focused && c.gameplay && !c.panel_open);
+    if !(zoom.on && gameplay) {
+        ZOOM_TOGGLED.with(|t| t.set(false));
+        ZOOM_SLOT.with(|s| s.set(None));
+        // A menu or another screen restores the view by itself: start the next zoom from 1.
+        ZOOM.with(|engine| {
+            if engine.get().divisor > 1.0 {
+                engine.set(zoom::Engine::default());
+            }
+        });
+        return;
+    }
+    let Some(controls) = controls else { return };
+    // Without a key (unbound) there is nothing to hold or press, so the zoom never starts.
+    let key = zoom.key.as_ref().map_or("", KeyName::as_str);
+    let active = if key.is_empty() {
+        ZOOM_TOGGLED.with(|t| t.set(false));
+        false
+    } else if zoom.toggle {
+        if controls.keys_pressed.iter().any(|k| k == key) {
+            ZOOM_TOGGLED.with(|t| t.set(!t.get()));
+        }
+        ZOOM_TOGGLED.with(StdCell::get)
+    } else {
+        ZOOM_TOGGLED.with(|t| t.set(false));
+        controls.keys_held.iter().any(|k| k == key)
+    };
+    let mut steps = 0;
+    if active {
+        for pressed in &controls.keys_pressed {
+            match pressed.as_str() {
+                "Equal" | "NumpadAdd" => steps += 1,
+                "Minus" | "NumpadSubtract" => steps -= 1,
+                _ => {}
+            }
+        }
+        if zoom.scroll {
+            steps += scroll_from_hotbar(controls);
+        }
+    } else {
+        ZOOM_SLOT.with(|s| s.set(None));
+    }
+    let mut engine = ZOOM.with(StdCell::get);
+    if !active && engine.divisor <= 1.0 {
+        return;
+    }
+    let output = engine.tick(&zoom, active, steps, delta);
+    ZOOM.with(|e| e.set(engine));
+    if output.applying
+        && let Err(error) = camera::set_view_scale(output.fov_scale, output.look_scale)
+    {
+        report_once(&format!(
+            "Boldy Mods: allow the Camera rotation permission for zoom ({error})"
+        ));
+    }
+}
+
+/// The scroll notches since the last frame while zooming, positive zooming in, from the
+/// selected hotbar slot moving: a mod cannot read the wheel itself during gameplay.
+fn scroll_from_hotbar(controls: &input::Controls) -> i32 {
+    let Some(now) = player_state::read_selected_slot()
+        .ok()
+        .flatten()
+        .map(|selected| selected.slot)
+    else {
+        return 0;
+    };
+    let last = ZOOM_SLOT.with(|slot| slot.replace(Some(now)));
+    // A number key jumps straight to a slot: that is not a scroll.
+    let jumped = controls.keys_pressed.iter().any(|key| {
+        key.strip_prefix("Digit")
+            .or_else(|| key.strip_prefix("Numpad"))
+            .is_some_and(|rest| rest.len() == 1 && rest != "0")
+    });
+    match last {
+        Some(last) if !jumped => zoom::scroll_steps(last, now),
+        _ => 0,
+    }
 }
 
 /// Asks Cinnabar for fullbright every frame while it is on (one cheap call), and switches it off
@@ -684,7 +1239,7 @@ fn apply_fullbright(enabled: bool, session: u64) {
         && changed
     {
         show_label(&format!(
-            "Block Outline: allow the Fullbright permission for fullbright ({error})"
+            "Boldy Mods: allow the Fullbright permission for fullbright ({error})"
         ));
     }
 }
@@ -694,52 +1249,12 @@ fn apply_fullbright(enabled: bool, session: u64) {
 fn reserve_keys(settings: &Settings) {
     let mut keys = vec![settings.menu_key.as_str().to_owned()];
     keys.extend(settings.fullbright_key.map(|key| key.as_str().to_owned()));
+    if settings.zoom.on
+        && let Some(key) = settings.zoom.key
+    {
+        keys.push(key.as_str().to_owned());
+    }
     let _ = input::reserve_keys(&keys);
-}
-
-/// Waits for the new fullbright key while its button is active: Escape keeps the old key,
-/// Backspace or Delete removes it, any other key (except the menu key) becomes it.
-fn capture_fullbright_key(controls: &input::Controls, seconds: f32) {
-    if !controls.panel_open {
-        set_capturing_fullbright(false, seconds);
-        return;
-    }
-    let Some(key) = controls
-        .keys_pressed
-        .iter()
-        .find(|key| !key.starts_with("Mouse"))
-    else {
-        return;
-    };
-    let mut settings = SETTINGS.with(StdCell::get);
-    let chosen = match key.as_str() {
-        "Escape" => settings.fullbright_key,
-        "Backspace" | "Delete" => None,
-        key if key == settings.menu_key.as_str() => settings.fullbright_key,
-        key => KeyName::new(key).or(settings.fullbright_key),
-    };
-    if chosen != settings.fullbright_key {
-        settings.fullbright_key = chosen;
-        SETTINGS.with(|s| s.set(settings));
-        if let Err(error) = settings::save(&settings.to_json()) {
-            report_once(&format!("Block Outline: settings not saved ({error})"));
-        }
-        reserve_keys(&settings);
-    }
-    set_capturing_fullbright(false, seconds);
-}
-
-/// Starts or ends waiting for a new fullbright key and redraws the button for it.
-fn set_capturing_fullbright(capturing: bool, seconds: f32) {
-    let state = MENU.with(|menu| {
-        let mut state = menu.get();
-        state.capturing_fullbright = capturing;
-        menu.set(state);
-        state
-    });
-    let settings = SETTINGS.with(StdCell::get);
-    HEAVY_FRAME.with(|heavy| heavy.set(true));
-    let _ = host_panel::update_content(&panel::update(&settings, seconds, state));
 }
 
 /// Switches fullbright when its key is pressed in game or with the menu open, with a message.
@@ -758,9 +1273,7 @@ fn toggle_fullbright_by_key(controls: &input::Controls) {
     }
     settings.fullbright = !settings.fullbright;
     SETTINGS.with(|s| s.set(settings));
-    if let Err(error) = settings::save(&settings.to_json()) {
-        report_once(&format!("Block Outline: settings not saved ({error})"));
-    }
+    save_settings(&settings);
     show_label(if settings.fullbright {
         "Fullbright: On"
     } else {
@@ -883,7 +1396,7 @@ fn shapes(target: &Target, settings: &Settings) -> Vec<Shape> {
 /// Hitboxes of nearby mobs and players, as Cinnabar uses for picking. Empty without the
 /// Players and Entities permissions; the host only returns the kinds this mod may see.
 /// Each nearby actor's boxes and whether Cinnabar's crosshair would hit it (`None`: unknown).
-fn nearby_actor_boxes(eye: [f64; 3]) -> Vec<(Vec<[f64; 6]>, Option<bool>)> {
+fn nearby_actor_boxes(eye: [f64; 3]) -> Observed {
     let around_eye = |actor: &player_state::Actor| {
         actor.boxes.iter().any(|b| {
             let (min, max) = ([b.min.0, b.min.1, b.min.2], [b.max.0, b.max.1, b.max.2]);
@@ -1087,7 +1600,7 @@ fn draw_outlines(shapes: &[Shape], dimension: i32, camera: [f64; 3], seconds: f3
             false
         }
         Err(error) => {
-            report_once(&format!("Block Outline: drawing failed ({})", error.detail));
+            report_once(&format!("Boldy Mods: drawing failed ({})", error.detail));
             false
         }
     };
@@ -1131,7 +1644,7 @@ fn draw_outlines(shapes: &[Shape], dimension: i32, camera: [f64; 3], seconds: f3
         }));
     }
     if let Err(error) = render::draw_lines(&lines) {
-        report_once(&format!("Block Outline: drawing failed ({error})"));
+        report_once(&format!("Boldy Mods: drawing failed ({error})"));
     }
 }
 
@@ -1276,7 +1789,7 @@ fn refresh_terrain(eye: [f64; 3], dir: [f64; 3], reach: f32, frame_session: u64)
             s.borrow()
                 .as_ref()
                 .filter(|sample| sample.min == min)
-                .map(|sample| sample.stamp.clone())
+                .map(|sample| sample.stamp)
         })
     } else {
         None
@@ -1288,7 +1801,7 @@ fn refresh_terrain(eye: [f64; 3], dir: [f64; 3], reach: f32, frame_session: u64)
         || terrain::read_region(query, after),
         |result| match result {
             Ok(ReadResult::Changed(region)) => Ok(Some((
-                region.stamp.clone(),
+                region.stamp,
                 Blocks::from_region(region, cells),
             ))),
             Ok(ReadResult::Pending | ReadResult::Unchanged(_)) => Ok(None),
@@ -1312,7 +1825,7 @@ fn refresh_terrain(eye: [f64; 3], dir: [f64; 3], reach: f32, frame_session: u64)
             });
         }
         Ok(None) => {}
-        Err(error) => report_once(&format!("Block Outline: terrain unavailable ({error})")),
+        Err(error) => report_once(&format!("Boldy Mods: terrain unavailable ({error})")),
     }
 }
 
@@ -1406,7 +1919,11 @@ fn expire_label(seconds: f32) {
 
 /// Shows the first persistent failure only, so a denied permission does not spam the HUD.
 fn report_once(text: &str) {
-    if !REPORTED_ERROR.with(|r| r.replace(true)) {
+    // FNV-1a: cheap, and enough to tell problems apart.
+    let hash = text
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+    if REPORTED_ERROR.with(|r| r.replace(hash)) != hash {
         show_label(text);
     }
 }

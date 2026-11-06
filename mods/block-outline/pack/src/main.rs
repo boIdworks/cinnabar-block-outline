@@ -15,12 +15,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .encode()?;
 
     let mut name = ComponentNameSection::new();
-    name.component("Block Outline");
+    name.component("Boldy Mods");
     name.append_to_component(&mut component);
     append_section(
         &mut component,
         "description",
-        b"Outlines the block you are looking at. Press F8 to change its colour, opacity and thickness.",
+        b"Outlines the block or mob you aim at in your own colours, with a movable arrow counter, a smooth scroll zoom and a fullbright switch. Press F8 for the menu.",
     );
     append_section(
         &mut component,

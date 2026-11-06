@@ -7,5 +7,7 @@
   "hud": true,
   "players": true,
   "entities": true,
-  "fullbright": true
+  "fullbright": true,
+  "player_state": true,
+  "camera": true
 }

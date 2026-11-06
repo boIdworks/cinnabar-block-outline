@@ -115,10 +115,11 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mod-api"
-version = "0.1.29"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=268e21c2c0a788425b9c964cf059757537ef17a0#268e21c2c0a788425b9c964cf059757537ef17a0"
+version = "0.1.31"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
 dependencies = [
  "serde",
+ "serde_json",
  "wit-bindgen",
 ]
 
@@ -188,9 +189,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",

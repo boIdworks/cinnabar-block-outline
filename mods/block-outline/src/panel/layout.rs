@@ -3,6 +3,18 @@
 use super::help::TIP_WIDTH;
 use super::*;
 
+/// `value` with at most three decimals and no trailing zeros: `0.5`, `1`, `0.984`.
+fn short(value: f32) -> String {
+    let text = format!("{value:.3}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text.is_empty() { "0".into() } else { text.into() }
+}
+
+/// Offset that centres a line of text in a control `height` tall.
+fn text_y(height: f32) -> f32 {
+    ((height - 10.0) / 2.0).floor()
+}
+
 /// A filled rounded rectangle.
 pub(super) fn rect(
     name: &str,
@@ -50,8 +62,35 @@ pub(super) fn button(name: &str, area: [f32; 4], action: &str, children: &[Strin
     )
 }
 
+/// Centres a label's text within its box.
+fn centred(label: String) -> String {
+    label.replacen(r#""type":"label","#, r#""type":"label","text_alignment":"center","#, 1)
+}
+
+/// `button` (as [`button`] builds it) with `child` added after its other children.
+fn with_last_child(button: &str, child: &str) -> String {
+    let close = button.rfind("]}}").expect("a button ends with its list of controls");
+    format!("{},{child}{}", &button[..close], &button[close..])
+}
+
 /// A button whose background colour and caption come from `#<name>_bg` and `#<name>_text`.
 pub(super) fn toggle_button(name: &str, area: [f32; 4], control: usize) -> String {
+    bound_button(name, area, control, false)
+}
+
+/// [`toggle_button`] with the caption in the middle: for buttons that do something, such as Reset.
+pub(super) fn action_button(name: &str, area: [f32; 4], control: usize) -> String {
+    bound_button(name, area, control, true)
+}
+
+fn bound_button(name: &str, area: [f32; 4], control: usize, middle: bool) -> String {
+    let text = label(
+        "text",
+        &format!("#{name}_text"),
+        [if middle { area[2] } else { area[2] - 10.0 }, 10.0],
+        [if middle { 0.0 } else { 6.0 }, text_y(area[3])],
+        TEXT,
+    );
     button(
         name,
         area,
@@ -66,43 +105,109 @@ pub(super) fn toggle_button(name: &str, area: [f32; 4], control: usize) -> Strin
                     r##","layer":1,"bindings":[{{"binding_name":"#{name}_bg","binding_name_override":"#color"}}]"##
                 ),
             ),
-            label(
-                "text",
-                &format!("#{name}_text"),
-                [area[2] - 10.0, 10.0],
-                [6.0, 3.0],
-                TEXT,
-            ),
+            if middle { centred(text) } else { text },
         ],
     )
+}
+
+/// An on / off row: the caption on the left and a pill switch on the right whose colour
+/// (`#<name>_bg`) and knob position (`#<name>_knob`) show the state.
+pub(super) fn switch_button(name: &str, area: [f32; 4], control: usize, caption: &str) -> String {
+    let mut off = String::new();
+    vector(&mut off, SWITCH_OFF);
+    let pill = format!(
+        r##"{{"pill":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{PILL_W},{PILL_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-7,0],"radius":{},"color":{off},"layer":2,"bindings":[{{"binding_name":"#{name}_bg","binding_name_override":"#color"}}],"controls":[{{"knob":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{KNOB},{KNOB}],"anchor_from":"left_middle","anchor_to":"left_middle","offset":[{KNOB_OFF},0],"radius":{},"color":[1,1,1,1],"layer":1,"bindings":[{{"binding_name":"#{name}_knob","binding_name_override":"#offset"}}]}}}}]}}}}"##,
+        PILL_H / 2.0,
+        KNOB / 2.0,
+    );
+    button(
+        name,
+        area,
+        &format!("mod.control:{control}"),
+        &[
+            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
+            label(
+                "text",
+                caption,
+                [area[2] - PILL_W - 22.0, 10.0],
+                [8.0, text_y(area[3])],
+                TEXT,
+            ),
+            pill,
+        ],
+    )
+}
+
+/// A key button, drawn like a key: a lighter cap with a darker lip under it. The caption (the
+/// key, or what to do) comes from `#<name>_text` and the cap's colour from `#<name>_bg`.
+pub(super) fn key_button(name: &str, area: [f32; 4], control: usize) -> String {
+    button(
+        name,
+        area,
+        &format!("mod.control:{control}"),
+        &[
+            rect("lip", r#"["100%","100%"]"#, [0.0, 0.0], KEY_LIP, r#","layer":1"#),
+            rect(
+                "cap",
+                &format!(r#"["100%","100% - {KEY_LIP_H}px"]"#),
+                [0.0, 0.0],
+                TRACK,
+                &format!(
+                    r##","layer":2,"bindings":[{{"binding_name":"#{name}_bg","binding_name_override":"#color"}}]"##
+                ),
+            ),
+            centred(label(
+                "text",
+                &format!("#{name}_text"),
+                [area[2], 10.0],
+                [0.0, text_y(area[3] - KEY_LIP_H)],
+                TEXT,
+            )),
+        ],
+    )
+}
+
+/// A value button (`Zoom level: 4x`): a [`toggle_button`] that also says `reset` on its right
+/// (`#<name>_reset`) while the value is not its default, since clicking it resets it.
+pub(super) fn value_button(name: &str, area: [f32; 4], control: usize) -> String {
+    let button = toggle_button(name, area, control);
+    let hint = label(
+        "reset",
+        &format!("#{name}_reset"),
+        [area[2] - 8.0, 10.0],
+        [0.0, text_y(area[3])],
+        DIM,
+    )
+    .replacen(r#""type":"label","#, r#""type":"label","text_alignment":"right","#, 1);
+    with_last_child(&button, &hint)
+}
+
+/// A button for the main action of a card: `plain_button` in the accent colour.
+pub(super) fn accent_button(name: &str, area: [f32; 4], control: usize, caption: &str) -> String {
+    let (mut plain, mut accent) = (String::new(), String::new());
+    vector(&mut plain, TRACK);
+    vector(&mut accent, ACTIVE);
+    plain_button(name, area, control, caption).replacen(&plain, &accent, 1)
 }
 
 /// A Line / Fill colour button: a toggle with a small swatch of that colour on its right.
 pub(super) fn edit_button(name: &str, area: [f32; 4], control: usize, swatch: &str) -> String {
     let toggle = toggle_button(name, area, control);
     let swatch = format!(
-        r##",{{"swatch_edge":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[22,11],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-3,0],"radius":2.5,"color":[0.9,0.9,0.92,0.9],"layer":2,"controls":[{{"swatch":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[20,9],"radius":2,"color":[1,1,1,1],"layer":1,"bindings":[{{"binding_name":"{swatch}","binding_name_override":"#color"}}]}}}}]}}}}"##
+        r##"{{"swatch_edge":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[22,11],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-3,0],"radius":2.5,"color":[0.9,0.9,0.92,0.9],"layer":2,"controls":[{{"swatch":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[20,9],"radius":2,"color":[1,1,1,1],"layer":1,"bindings":[{{"binding_name":"{swatch}","binding_name_override":"#color"}}]}}}}]}}}}"##
     );
-    // Insert the swatch as the button's last child.
-    let close = toggle.rfind("]}}").expect("button closes its controls");
-    format!("{}{}{}", &toggle[..close], swatch, &toggle[close..])
+    with_last_child(&toggle, &swatch)
 }
 
-/// A button showing a fixed caption on the plain track colour.
+/// A button showing a fixed caption, centred, on the plain track colour.
 pub(super) fn plain_button(name: &str, area: [f32; 4], control: usize, caption: &str) -> String {
     button(
         name,
         area,
         &format!("mod.control:{control}"),
         &[
-            rect(
-                "bg",
-                r#"["100%","100%"]"#,
-                [0.0, 0.0],
-                TRACK,
-                r#","layer":1"#,
-            ),
-            label("text", caption, [area[2] - 10.0, 10.0], [6.0, 3.0], TEXT),
+            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
+            centred(label("text", caption, [area[2], 10.0], [0.0, text_y(area[3])], TEXT)),
         ],
     )
 }
@@ -154,12 +259,15 @@ pub(super) fn colour_button(
 pub(super) fn slider_row(index: usize, y: f32) -> Vec<String> {
     let track = track_width();
     let (id, fill) = SLIDERS[index];
+    let (mut empty, mut filled) = (String::new(), String::new());
+    vector(&mut empty, SLIDER_TRACK);
+    vector(&mut filled, fill);
     vec![
         label(
             &format!("{id}_label"),
             title(id),
             [VALUE_X - 12.0, 10.0],
-            [10.0, y + 2.0],
+            [10.0, y + text_y(ROW_HEIGHT)],
             TEXT,
         ),
         button(
@@ -180,7 +288,7 @@ pub(super) fn slider_row(index: usize, y: f32) -> Vec<String> {
                     "number",
                     &format!("#{id}_value"),
                     [VALUE_WIDTH - 6.0, 10.0],
-                    [4.0, 2.0],
+                    [4.0, text_y(ROW_HEIGHT)],
                     TEXT,
                 ),
             ],
@@ -190,21 +298,18 @@ pub(super) fn slider_row(index: usize, y: f32) -> Vec<String> {
             [TRACK_X, y, track, ROW_HEIGHT],
             &format!("mod.control:{index}"),
             &[
-                rect(
-                    "track",
-                    r#"["100%","100%"]"#,
-                    [0.0, 0.0],
-                    TRACK,
-                    r#","layer":1"#,
+                format!(
+                    r##"{{"track":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":["100%",{TRACK_H}],"anchor_from":"left_middle","anchor_to":"left_middle","radius":{},"color":{empty},"layer":1}}}}"##,
+                    TRACK_H / 2.0,
                 ),
-                rect(
-                    "fill",
-                    r#"["50%","100%"]"#,
-                    [0.0, 0.0],
-                    fill,
-                    &format!(
-                        r##","layer":2,"bindings":[{{"binding_name":"#{id}_fill","binding_name_override":"#size_binding_x"}}],"controls":[{{"knob":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[3,"100% + 4px"],"anchor_from":"right_middle","anchor_to":"right_middle","radius":1.5,"color":[1,1,1,0.92],"layer":2}}}}]"##
-                    ),
+                format!(
+                    r##"{{"fill":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":["50%",{TRACK_H}],"anchor_from":"left_middle","anchor_to":"left_middle","radius":{},"color":{filled},"layer":2,"bindings":[{{"binding_name":"#{id}_fill","binding_name_override":"#size_binding_x"}}],"controls":[{{"knob_edge":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{},{}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[{},0],"radius":{},"color":[0,0,0,0.4],"layer":2,"controls":[{{"knob":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{SLIDER_KNOB},{SLIDER_KNOB}],"radius":{},"color":[1,1,1,1],"layer":1}}}}]}}}}]}}}}"##,
+                    TRACK_H / 2.0,
+                    SLIDER_KNOB + 2.0,
+                    SLIDER_KNOB + 2.0,
+                    SLIDER_KNOB / 2.0 + 1.0,
+                    SLIDER_KNOB / 2.0 + 1.0,
+                    SLIDER_KNOB / 2.0,
                 ),
             ],
         ),
@@ -216,24 +321,61 @@ pub(super) fn wheel() -> String {
     let [x, y, side] = WHEEL;
     // A disc of small cells: hue by angle, saturation by distance from the centre.
     let cells = (side / WHEEL_CELL) as usize;
-    let mut children = Vec::with_capacity(cells * cells);
+    // A little larger than the grid step, so neighbouring cells overlap and leave no seams.
+    let s = WHEEL_CELL + 0.25;
+    let mut children = Vec::with_capacity(cells * cells + 2);
+    // A dark rim a little wider than the disc hides the stepped edge of its cells.
+    children.push(
+        rect(
+            "rim",
+            &format!("[{},{}]", side + 3.0, side + 3.0),
+            [-1.5, -1.5],
+            [0.1, 0.11, 0.14, 1.0],
+            r#","layer":1"#,
+        )
+        .replace(r#""radius":3"#, &format!(r#""radius":{}"#, side / 2.0 + 1.5)),
+    );
+    // Where a cell's centre falls: inside the disc or not, and how far from its middle.
+    let place = |column: f32, row: f32| {
+        let (dx, dy) = (column / cells as f32 - 0.5, 0.5 - row / cells as f32);
+        (2.0 * (dx * dx + dy * dy).sqrt(), dy, dx)
+    };
+    let mut cell = |column: f32, row: f32, size: f32| {
+        let (distance, dy, dx) = place(column, row);
+        if distance > 1.0 {
+            return;
+        }
+        let hue = dy.atan2(dx) / std::f32::consts::TAU;
+        // Three decimals are finer than a colour step, and keep the document small: the
+        // wheel is most of it, and the host refuses a document over 192 KiB.
+        let [r, g, b] = hsv_to_rgb(hue, distance, 1.0).map(|c| short(f32::from(c) / 255.0));
+        let name = children.len();
+        children.push(format!(
+            r#"{{"c{name}@block_outline.cell":{{"size":[{size},{size}],"offset":[{},{}],"color":[{r},{g},{b},1]}}}}"#,
+            // Anchored at the centre, as every control is by default, which saves the two
+            // anchor fields on each of the wheel's several hundred cells.
+            column * WHEEL_CELL - side / 2.0,
+            row * WHEEL_CELL - side / 2.0,
+        ));
+    };
     for row in 0..cells {
         for column in 0..cells {
-            let cx = (column as f32 + 0.5) / cells as f32;
-            let cy = (row as f32 + 0.5) / cells as f32;
-            let (dx, dy) = (cx - 0.5, 0.5 - cy);
-            let distance = 2.0 * (dx * dx + dy * dy).sqrt();
-            if distance > 1.0 {
-                continue;
+            let (c, r) = (column as f32 + 0.5, row as f32 + 0.5);
+            let inside = |dc: f32, dr: f32| place(c + dc, r + dr).0 <= 1.0;
+            let here = inside(0.0, 0.0);
+            // Cells on the rim, inside or out, are cut into quarters, so the edge of the disc
+            // follows the circle more closely than whole cells can.
+            let rim = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
+                .iter()
+                .any(|&(dc, dr)| inside(dc, dr) != here);
+            if rim {
+                let quarter = s / 2.0 + 0.2;
+                for (qc, qr) in [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
+                    cell(c + qc, r + qr, quarter);
+                }
+            } else if here {
+                cell(c, r, s);
             }
-            let hue = dy.atan2(dx) / std::f32::consts::TAU;
-            let [r, g, b] = hsv_to_rgb(hue, distance, 1.0).map(|c| f32::from(c) / 255.0);
-            children.push(format!(
-                r#"{{"c{row}_{column}":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{s},{s}],"offset":[{},{}],"anchor_from":"top_left","anchor_to":"top_left","radius":0,"color":[{r},{g},{b},1],"layer":1}}}}"#,
-                column as f32 * WHEEL_CELL,
-                row as f32 * WHEEL_CELL,
-                s = WHEEL_CELL + 0.25,
-            ));
         }
     }
     // Marker: a dark ring around a light dot, moved by the `#wheel_marker` offset binding.
@@ -267,7 +409,8 @@ pub(super) fn shown_by(name: &str, binding: &str, children: &[String]) -> String
 
 /// A small section caption with a thin rule running to the card's right edge.
 pub(super) fn caption(name: &str, text: &str, y: f32) -> String {
-    let rule_x = 16.0 + 5.4 * text.len() as f32;
+    let text = text.to_uppercase();
+    let rule_x = 16.0 + 6.0 * text.len() as f32;
     let rule = rect(
         &format!("{name}_rule"),
         &format!("[{},1]", SETTINGS_W - 10.0 - rule_x),
@@ -277,7 +420,7 @@ pub(super) fn caption(name: &str, text: &str, y: f32) -> String {
     );
     format!(
         "{},{rule}",
-        label(name, text, [120.0, 10.0], [10.0, y], DIM)
+        label(name, &text, [120.0, 10.0], [10.0, y], CAPTION_TEXT)
     )
 }
 
@@ -285,12 +428,19 @@ pub(super) fn caption(name: &str, text: &str, y: f32) -> String {
 pub(super) fn top_controls() -> Vec<String> {
     let right = 10.0 + HALF + 4.0;
     vec![
+        // A small accent beside the title gives the card its colour.
+        rect("accent", "[3,12]", [10.0, 7.0], ACCENT, r#","layer":2"#),
         label(
             "title",
             "#title_text",
-            [BACK_AREA[0] - 14.0, 10.0],
-            [10.0, 9.0],
+            [BACK_AREA[0] - 14.0 - TITLE_X, 10.0],
+            [10.0 + TITLE_X, 7.0],
             TEXT,
+        )
+        .replacen(
+            r#""type":"label","#,
+            &format!(r#""type":"label","font_scale_factor":{TITLE_SCALE},"#),
+            1,
         ),
         plain_button("close", CLOSE_AREA, CLOSE, "X"),
         rect(
@@ -310,13 +460,13 @@ pub(super) fn top_controls() -> Vec<String> {
                     &[
                         edit_button(
                             "edit_line",
-                            [10.0, EDIT_Y, HALF, 15.0],
+                            [10.0, EDIT_Y, HALF, BUTTON_H],
                             EDIT_LINE,
                             "#line_swatch",
                         ),
                         edit_button(
                             "edit_fill",
-                            [right, EDIT_Y, HALF, 15.0],
+                            [right, EDIT_Y, HALF, BUTTON_H],
                             EDIT_FILL,
                             "#fill_swatch",
                         ),
@@ -326,7 +476,7 @@ pub(super) fn top_controls() -> Vec<String> {
                     "fill_match",
                     &[edit_button(
                         "edit_line",
-                        [10.0, EDIT_Y, SETTINGS_W - 20.0, 15.0],
+                        [10.0, EDIT_Y, SETTINGS_W - 20.0, BUTTON_H],
                         EDIT_LINE,
                         "#line_swatch",
                     )],
@@ -336,13 +486,13 @@ pub(super) fn top_controls() -> Vec<String> {
                     &[
                         edit_button(
                             "edit_line",
-                            [10.0, EDIT_Y, HALF, 15.0],
+                            [10.0, EDIT_Y, HALF, BUTTON_H],
                             EDIT_LINE,
                             "#line_swatch",
                         ),
                         edit_button(
                             "edit_aim",
-                            [right, EDIT_Y, HALF, 15.0],
+                            [right, EDIT_Y, HALF, BUTTON_H],
                             EDIT_AIM,
                             "#aim_swatch",
                         ),
@@ -356,7 +506,7 @@ pub(super) fn top_controls() -> Vec<String> {
             r##"{{"hint_row":{{"type":"panel","size":[{SETTINGS_W},12],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","layer":2,"bindings":[{{"binding_name":"#hint_offset","binding_name_override":"#offset"}}],"controls":[{}]}}}}"##,
             label(
                 "hint",
-                "Hover for help. Esc closes.",
+                "#hint_text",
                 [SETTINGS_W - 20.0, 10.0],
                 [10.0, 0.0],
                 DIM
@@ -367,33 +517,29 @@ pub(super) fn top_controls() -> Vec<String> {
 
 /// The start page: a button for each page and the menu key.
 pub(super) fn home_controls() -> Vec<String> {
-    let page_button = |name: &str, y: f32, control: usize, title: &str, about: &str| {
+    let page_button = |name: &str, y: f32, control: usize, icon: usize, title: &str, about: &str| {
+        let badge = (HOME_BUTTON_H - BADGE) / 2.0;
+        let mut children = vec![
+            rect("bg", r#"["100%","100%"]"#, [0.0, 0.0], TRACK, r#","layer":1"#),
+            // A dark tile with the page's icon on it, drawn in the page's current colour.
+            rect(
+                "badge",
+                &format!("[{BADGE},{BADGE}]"),
+                [badge, badge],
+                ICON_BG,
+                r#","layer":2"#,
+            )
+            .replace(r#""radius":3"#, r#""radius":6"#),
+        ];
+        children.extend(home_icon(name, icon, badge));
+        children.push(label("name", title, [SETTINGS_W - 70.0, 10.0], [badge * 2.0 + BADGE, 6.0], TEXT));
+        children.push(label("about", about, [SETTINGS_W - 70.0, 10.0], [badge * 2.0 + BADGE, 19.0], DIM));
+        children.push(label("arrow", ">", [10.0, 10.0], [SETTINGS_W - 34.0, 12.0], TEXT));
         button(
             name,
             [10.0, y, SETTINGS_W - 20.0, HOME_BUTTON_H],
             &format!("mod.control:{control}"),
-            &[
-                rect(
-                    "bg",
-                    r#"["100%","100%"]"#,
-                    [0.0, 0.0],
-                    TRACK,
-                    r#","layer":1"#,
-                ),
-                // The page's current line colour.
-                rect(
-                    "stripe",
-                    &format!("[4,{}]", HOME_BUTTON_H - 10.0),
-                    [6.0, 5.0],
-                    [1.0, 1.0, 1.0, 1.0],
-                    &format!(
-                        r##","layer":2,"bindings":[{{"binding_name":"#{name}_color","binding_name_override":"#color"}}]"##
-                    ),
-                ),
-                label("name", title, [SETTINGS_W - 50.0, 10.0], [16.0, 6.0], TEXT),
-                label("about", about, [SETTINGS_W - 50.0, 10.0], [16.0, 19.0], DIM),
-                label("arrow", ">", [10.0, 10.0], [SETTINGS_W - 34.0, 12.0], TEXT),
-            ],
+            &children,
         )
     };
     vec![
@@ -401,52 +547,282 @@ pub(super) fn home_controls() -> Vec<String> {
             "open_block",
             HOME_BLOCK_Y,
             OPEN_BLOCK,
+            0,
             "Block outline",
-            "The block you are looking at",
+            HOME_ABOUT[0],
         ),
         page_button(
             "open_mob",
             HOME_MOB_Y,
             OPEN_MOB,
+            1,
             "Mob hitbox",
-            "Mobs and players you look at",
+            HOME_ABOUT[1],
         ),
-        caption("general_caption", "General", HOME_KEY_Y - 16.0),
-        label(
-            "key_title",
-            "Menu key",
-            [VALUE_X - 12.0, 10.0],
-            [10.0, HOME_KEY_Y + 3.0],
-            TEXT,
+        page_button(
+            "open_counter",
+            HOME_COUNTER_Y,
+            OPEN_COUNTER,
+            2,
+            "Arrow counter",
+            HOME_ABOUT[2],
         ),
-        toggle_button(
-            "menu_key",
-            [VALUE_X, HOME_KEY_Y, SETTINGS_W - 10.0 - VALUE_X, 15.0],
-            MENU_KEY,
+        page_button(
+            "open_zoom",
+            HOME_ZOOM_Y,
+            OPEN_ZOOM,
+            3,
+            "Zoom",
+            HOME_ABOUT[3],
         ),
-        toggle_button(
-            "fullbright",
-            [10.0, HOME_FULLBRIGHT_Y, SETTINGS_W - 20.0, 15.0],
-            FULLBRIGHT,
-        ),
+        caption("light_caption", "Lighting", HOME_LIGHT_CAPTION_Y),
+        switch_button("fullbright", [10.0, HOME_FULLBRIGHT_Y, SETTINGS_W - 20.0, BUTTON_H], FULLBRIGHT, "Fullbright"),
         label(
             "fullbright_key_title",
-            "Light key",
-            [VALUE_X - 12.0, 10.0],
-            [10.0, HOME_FULLBRIGHT_KEY_Y + 3.0],
+            "Fullbright key",
+            [KEY_X - 12.0, 10.0],
+            [10.0, HOME_FULLBRIGHT_KEY_Y + text_y(BUTTON_H)],
             TEXT,
         ),
-        toggle_button(
-            "fullbright_key",
+        key_button("fullbright_key",
             [
-                VALUE_X,
+                KEY_X,
                 HOME_FULLBRIGHT_KEY_Y,
-                SETTINGS_W - 10.0 - VALUE_X,
-                15.0,
+                SETTINGS_W - 10.0 - KEY_X,
+                BUTTON_H,
             ],
             FULLBRIGHT_KEY,
         ),
+        caption("menu_caption", "Menu", HOME_MENU_CAPTION_Y),
+        label(
+            "key_title",
+            "Menu key",
+            [KEY_X - 12.0, 10.0],
+            [10.0, HOME_KEY_Y + text_y(BUTTON_H)],
+            TEXT,
+        ),
+        key_button("menu_key",
+            [KEY_X, HOME_KEY_Y, SETTINGS_W - 10.0 - KEY_X, BUTTON_H],
+            MENU_KEY,
+        ),
     ]
+}
+
+/// The icon of a start page button, drawn from a few rectangles on the `BADGE` tile at `(at, at)`:
+/// a block (two squares), a mob in its hitbox, an arrow and a magnifier. The strokes take the
+/// colour of `#<name>_color`; cut-outs are the tile's colour.
+fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
+    let piece = |id: &str, x: f32, y: f32, w: f32, h: f32, radius: f32, stroke: bool, layer: u8| {
+        let extra = if stroke {
+            format!(
+                r##","layer":{layer},"bindings":[{{"binding_name":"#{name}_color","binding_name_override":"#color"}}]"##
+            )
+        } else {
+            format!(r#","layer":{layer}"#)
+        };
+        rect(id, &format!("[{w},{h}]"), [at + x, at + y], if stroke { [1.0; 4] } else { ICON_BG }, &extra)
+            .replace(r#""radius":3"#, &format!(r#""radius":{radius}"#))
+    };
+    match kind {
+        // Two outlined squares, the front one over the back one: a block.
+        0 => vec![
+            piece("i0", 8.0, 3.0, 11.0, 11.0, 1.5, true, 3),
+            piece("i1", 10.0, 5.0, 7.0, 7.0, 0.5, false, 4),
+            piece("i2", 3.0, 8.0, 11.0, 11.0, 1.5, true, 5),
+            piece("i3", 5.0, 10.0, 7.0, 7.0, 0.5, false, 6),
+        ],
+        // A figure inside its hitbox.
+        1 => vec![
+            piece("i0", 6.0, 3.0, 10.0, 16.0, 1.5, true, 3),
+            piece("i1", 8.0, 5.0, 6.0, 12.0, 0.5, false, 4),
+            piece("i2", 9.0, 6.0, 4.0, 4.0, 2.0, true, 5),
+            piece("i3", 8.0, 11.0, 6.0, 4.0, 1.0, true, 5),
+        ],
+        // An arrow pointing right, in steps of two units.
+        2 => vec![
+            piece("i0", 4.0, 10.0, 14.0, 2.0, 0.5, true, 3),
+            piece("i1", 13.0, 6.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i2", 15.0, 8.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i3", 13.0, 14.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i4", 15.0, 12.0, 2.0, 2.0, 0.0, true, 3),
+        ],
+        // A magnifier: a ring and a handle.
+        _ => vec![
+            piece("i0", 4.0, 4.0, 12.0, 12.0, 6.0, true, 3),
+            piece("i1", 6.0, 6.0, 8.0, 8.0, 4.0, false, 4),
+            piece("i2", 14.0, 14.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i3", 16.0, 16.0, 2.0, 2.0, 0.0, true, 3),
+        ],
+    }
+}
+
+/// The Arrow counter page: on/off, bow only, moving, size and reset.
+pub(super) fn counter_controls() -> Vec<String> {
+    let full = SETTINGS_W - 20.0;
+    vec![
+        switch_button("counter", [10.0, COUNTER_ON_Y, full, BUTTON_H], COUNTER, "Show counter"),
+        switch_button("counter_bow", [10.0, COUNTER_BOW_Y, full, BUTTON_H], COUNTER_BOW, "Only with a bow"),
+        caption("counter_caption", "Place", COUNTER_CAPTION_Y),
+        plain_button(
+            "counter_move",
+            [10.0, COUNTER_MOVE_Y, full, BUTTON_H],
+            COUNTER_MOVE,
+            "Move and resize on screen",
+        ),
+        value_button("counter_size",
+            [10.0, COUNTER_SIZE_Y, HIGHLIGHT_W, BUTTON_H],
+            COUNTER_SIZE,
+        ),
+        plain_button(
+            "counter_smaller",
+            [
+                SETTINGS_W - 10.0 - 2.0 * STEP_W - 4.0,
+                COUNTER_SIZE_Y,
+                STEP_W,
+                BUTTON_H,
+            ],
+            COUNTER_SMALLER,
+            "-",
+        ),
+        plain_button(
+            "counter_bigger",
+            [SETTINGS_W - 10.0 - STEP_W, COUNTER_SIZE_Y, STEP_W, BUTTON_H],
+            COUNTER_BIGGER,
+            "+",
+        ),
+        action_button("counter_reset",
+            [10.0, COUNTER_RESET_Y, full, BUTTON_H],
+            COUNTER_RESET,
+        ),
+    ]
+}
+
+/// A value row: the value on a button that resets it, beside - and + buttons.
+fn stepper(name: &str, y: f32, value: usize, less: usize, more: usize) -> Vec<String> {
+    vec![
+        value_button(name, [10.0, y, HIGHLIGHT_W, BUTTON_H], value),
+        plain_button(
+            &format!("{name}_less"),
+            [SETTINGS_W - 10.0 - 2.0 * STEP_W - 4.0, y, STEP_W, BUTTON_H],
+            less,
+            "-",
+        ),
+        plain_button(
+            &format!("{name}_more"),
+            [SETTINGS_W - 10.0 - STEP_W, y, STEP_W, BUTTON_H],
+            more,
+            "+",
+        ),
+    ]
+}
+
+/// The Zoom page: on/off, the zoom key, how it works and three values.
+pub(super) fn zoom_controls() -> Vec<String> {
+    let full = SETTINGS_W - 20.0;
+    let mut page = vec![
+        switch_button("zoom", [10.0, ZOOM_ON_Y, full, BUTTON_H], ZOOM_ON, "Enable zoom"),
+        label(
+            "zoom_key_title",
+            "Zoom key",
+            [KEY_X - 12.0, 10.0],
+            [10.0, ZOOM_KEY_Y + text_y(BUTTON_H)],
+            TEXT,
+        ),
+        key_button("zoom_key",
+            [KEY_X, ZOOM_KEY_Y, SETTINGS_W - 10.0 - KEY_X, BUTTON_H],
+            ZOOM_KEY,
+        ),
+        switch_button("zoom_mode", [10.0, ZOOM_MODE_Y, full, BUTTON_H], ZOOM_MODE, "Press to toggle"),
+        switch_button("zoom_scroll", [10.0, ZOOM_SCROLL_Y, full, BUTTON_H], ZOOM_SCROLL, "Scroll zoom"),
+        switch_button("zoom_sens", [10.0, ZOOM_SENS_Y, full, BUTTON_H], ZOOM_SENS, "Relative sensitivity"),
+        caption("zoom_caption", "Feel", ZOOM_CAPTION_Y),
+    ];
+    page.extend(stepper(
+        "zoom_level",
+        ZOOM_LEVEL_Y,
+        ZOOM_LEVEL,
+        ZOOM_LEVEL_LESS,
+        ZOOM_LEVEL_MORE,
+    ));
+    page.extend(stepper(
+        "zoom_time",
+        ZOOM_TIME_Y,
+        ZOOM_TIME,
+        ZOOM_TIME_LESS,
+        ZOOM_TIME_MORE,
+    ));
+    page.extend(stepper(
+        "zoom_step",
+        ZOOM_STEP_Y,
+        ZOOM_STEP,
+        ZOOM_STEP_LESS,
+        ZOOM_STEP_MORE,
+    ));
+    page.push(action_button("zoom_reset",
+        [10.0, ZOOM_RESET_Y, full, BUTTON_H],
+        ZOOM_RESET,
+    ));
+    page
+}
+
+/// The guide shown while the counter is moved, with Reset and Done buttons: one copy at the
+/// top of the screen and one at the bottom, so it never covers the counter.
+pub(super) fn moving_guides() -> String {
+    format!(
+        "{},{}",
+        moving_guide("guide_top", "top_middle", 10.0),
+        moving_guide("guide_bottom", "bottom_middle", -10.0)
+    )
+}
+
+fn moving_guide(name: &str, anchor: &str, offset_y: f32) -> String {
+    let lines = GUIDE_LINES;
+    // The card's look: a light edge, the dark body and the accent beside the text.
+    let mut children = vec![
+        rect(
+            "guide_border",
+            &format!("[{},{}]", GUIDE_W + 2.0, GUIDE_H + 2.0),
+            [-1.0, -1.0],
+            BORDER,
+            r#","layer":1"#,
+        )
+        .replace(r#""radius":3"#, r#""radius":8"#),
+        rect(
+            "guide_bg",
+            r#"["100%","100%"]"#,
+            [0.0, 0.0],
+            [0.07, 0.08, 0.1, 0.96],
+            r#","layer":1"#,
+        )
+        .replace(r#""radius":3"#, r#""radius":7"#),
+        rect("guide_accent", "[3,34]", [10.0, 8.0], ACCENT, r#","layer":2"#),
+    ];
+    for (index, line) in lines.iter().enumerate() {
+        children.push(label(
+            &format!("guide_{index}"),
+            line,
+            [GUIDE_W - GUIDE_TEXT_X - 10.0, 10.0],
+            [GUIDE_TEXT_X, 8.0 + 12.0 * index as f32],
+            if index == 0 { TEXT } else { DIM },
+        ));
+    }
+    children.push(plain_button(
+        "guide_reset",
+        [GUIDE_W - 116.0, GUIDE_H - 24.0, 50.0, BUTTON_H],
+        COUNTER_RESET,
+        "Reset",
+    ));
+    // Done is the main action here.
+    children.push(accent_button(
+        "counter_done",
+        [GUIDE_W - 60.0, GUIDE_H - 24.0, 50.0, BUTTON_H],
+        COUNTER_DONE,
+        "Done",
+    ));
+    format!(
+        r##"{{"{name}":{{"type":"panel","size":[{GUIDE_W},{GUIDE_H}],"offset":[0,{offset_y}],"anchor_from":"{anchor}","anchor_to":"{anchor}","layer":2,"bindings":[{{"binding_name":"#{name}_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}}"##,
+        children.join(",")
+    )
 }
 
 /// The settings view, below the Line / Fill colour buttons while the colour tools are hidden.
@@ -470,43 +846,29 @@ pub(super) fn settings_column() -> Vec<String> {
         "block_effects",
         "block_only",
         &[
-            toggle_button("rainbow", [10.0, TOGGLES_Y, HALF, 15.0], RAINBOW),
-            toggle_button("pulse", [right, TOGGLES_Y, HALF, 15.0], PULSE),
+            switch_button("rainbow", [10.0, TOGGLES_Y, HALF, BUTTON_H], RAINBOW, "Rainbow"),
+            switch_button("pulse", [right, TOGGLES_Y, HALF, BUTTON_H], PULSE, "Pulse"),
         ],
     ));
     options.push(shown_by(
         "mob_effects",
         "mob_only",
-        &[toggle_button(
-            "rainbow",
-            [10.0, TOGGLES_Y, SETTINGS_W - 20.0, 15.0],
-            RAINBOW,
-        )],
+        &[switch_button("rainbow", [10.0, TOGGLES_Y, SETTINGS_W - 20.0, BUTTON_H], RAINBOW, "Rainbow")],
     ));
     // Blocks: Fill match beside Reset. Mobs: All mobs beside Reset.
     options.push(shown_by(
         "block_bottom",
         "block_only",
-        &[toggle_button(
-            "fill_match",
-            [10.0, BOTTOM_Y, HALF, 15.0],
-            FILL_MATCH,
-        )],
+        &[switch_button("fill_match", [10.0, BOTTOM_Y, HALF, BUTTON_H], FILL_MATCH, "Match fill")],
     ));
     options.push(shown_by(
         "mob_bottom",
         "mob_only",
-        &[toggle_button(
-            "show_all_mobs",
-            [10.0, BOTTOM_Y, HALF, 15.0],
-            SHOW_ALL,
-        )],
+        &[switch_button("show_all_mobs", [10.0, BOTTOM_Y, HALF, BUTTON_H], SHOW_ALL, "All mobs")],
     ));
-    options.push(plain_button(
-        "reset",
-        [right, BOTTOM_Y, HALF, 15.0],
+    options.push(action_button("reset",
+        [right, BOTTOM_Y, HALF, BUTTON_H],
         RESET,
-        "Reset",
     ));
     // Only blocks have the game's highlight.
     options.push(shown_when(
@@ -514,7 +876,7 @@ pub(super) fn settings_column() -> Vec<String> {
         &[
             toggle_button(
                 "hide_game_highlight",
-                [10.0, HIGHLIGHT_Y, HIGHLIGHT_W, 15.0],
+                [10.0, HIGHLIGHT_Y, HIGHLIGHT_W, BUTTON_H],
                 HIDE_HIGHLIGHT,
             ),
             plain_button(
@@ -523,14 +885,14 @@ pub(super) fn settings_column() -> Vec<String> {
                     SETTINGS_W - 10.0 - 2.0 * STEP_W - 4.0,
                     HIGHLIGHT_Y,
                     STEP_W,
-                    15.0,
+                    BUTTON_H,
                 ],
                 HIGHLIGHT_LESS,
                 "-",
             ),
             plain_button(
                 "highlight_more",
-                [SETTINGS_W - 10.0 - STEP_W, HIGHLIGHT_Y, STEP_W, 15.0],
+                [SETTINGS_W - 10.0 - STEP_W, HIGHLIGHT_Y, STEP_W, BUTTON_H],
                 HIGHLIGHT_MORE,
                 "+",
             ),
@@ -554,14 +916,14 @@ pub(super) fn colour_column() -> Vec<String> {
     let hex_w = SETTINGS_W - 10.0 - HEX_X;
     column.push(label(
         "hex_title",
-        "Hex code",
+        "HEX CODE",
         [hex_w, 10.0],
         [HEX_X, HEX_Y],
-        DIM,
+        CAPTION_TEXT,
     ));
     column.push(button(
         "hex_field",
-        [HEX_X, HEX_Y + 12.0, hex_w, 15.0],
+        [HEX_X, HEX_Y + 12.0, hex_w, BUTTON_H],
         &format!("mod.control:{}", FIRST_TYPE + SLIDERS.len()),
         &[
             rect(
@@ -571,30 +933,30 @@ pub(super) fn colour_column() -> Vec<String> {
                 TRACK,
                 r##","layer":1,"bindings":[{"binding_name":"#hex_box","binding_name_override":"#color"}]"##,
             ),
-            label("field_text", "#hex_text", [hex_w - 8.0, 10.0], [5.0, 3.0], TEXT),
+            label("field_text", "#hex_text", [hex_w - 8.0, 10.0], [5.0, text_y(BUTTON_H)], TEXT),
         ],
     ));
     column.push(label(
         "type_hint",
         "Type 0-9 and A-F,",
         [hex_w, 10.0],
-        [HEX_X, HEX_Y + 32.0],
+        [HEX_X, HEX_Y + 35.0],
         DIM,
     ));
     column.push(label(
         "enter_hint",
         "then press Enter",
         [hex_w, 10.0],
-        [HEX_X, HEX_Y + 44.0],
+        [HEX_X, HEX_Y + 47.0],
         DIM,
     ));
 
     column.push(label(
         "swatch_title",
-        "Quick colours",
+        "QUICK COLOURS",
         [120.0, 10.0],
         [10.0, SWATCH_Y],
-        DIM,
+        CAPTION_TEXT,
     ));
     let swatch_width = (SETTINGS_W - 20.0) / SWATCHES.len() as f32;
     for (index, (name, rgb)) in SWATCHES.iter().enumerate() {
@@ -605,7 +967,7 @@ pub(super) fn colour_column() -> Vec<String> {
                 10.0 + swatch_width * index as f32,
                 SWATCH_Y + 12.0,
                 swatch_width - 3.0,
-                16.0,
+                BUTTON_H,
             ],
             FIRST_SWATCH + index,
             Ok([r, g, b, 1.0]),
@@ -613,15 +975,15 @@ pub(super) fn colour_column() -> Vec<String> {
     }
     column.push(label(
         "favourite_title",
-        "Saved colours",
+        "SAVED COLOURS",
         [120.0, 10.0],
         [10.0, FAVOURITE_Y],
-        DIM,
+        CAPTION_TEXT,
     ));
     for slot in 0..FAVOURITES {
         column.push(colour_button(
             &format!("favourite_{slot}"),
-            [10.0 + 34.0 * slot as f32, FAVOURITE_Y + 12.0, 30.0, 16.0],
+            [10.0 + 34.0 * slot as f32, FAVOURITE_Y + 12.0, 30.0, BUTTON_H],
             FIRST_FAVOURITE + slot,
             Err(&format!("#favourite_{slot}_color")),
         ));
@@ -629,18 +991,121 @@ pub(super) fn colour_column() -> Vec<String> {
     let save_x = 10.0 + 34.0 * FAVOURITES as f32;
     column.push(plain_button(
         "save_favourite",
-        [save_x, FAVOURITE_Y + 12.0, SETTINGS_W - 10.0 - save_x, 16.0],
+        [save_x, FAVOURITE_Y + 12.0, SETTINGS_W - 10.0 - save_x, BUTTON_H],
         SAVE_FAVOURITE,
         "Save colour",
     ));
     column
 }
 
+/// A lighter inset panel behind a group of rows, from `top` to `bottom` on the card.
+fn section(name: &str, top: f32, bottom: f32) -> String {
+    rect(
+        name,
+        &format!("[{},{}]", SETTINGS_W - 2.0 * SECTION_PAD, bottom - top),
+        [SECTION_PAD, top],
+        SECTION,
+        r#","layer":1"#,
+    )
+    .replace(r#""radius":3"#, r#""radius":6"#)
+}
+
+/// One side of the focus frame, moved by `#focus_<side>` and sized along its length by
+/// `#focus_wide` (top and bottom) or `#focus_tall` (left and right).
+fn focus_edge(name: &str, side: &str, vertical: bool) -> String {
+    let size = if vertical { format!("[{FOCUS_LINE},10]") } else { format!("[10,{FOCUS_LINE}]") };
+    let (length, axis) = if vertical { ("#focus_tall", "#size_binding_y_absolute") } else { ("#focus_wide", "#size_binding_x_absolute") };
+    rect(
+        name,
+        &size,
+        [0.0, 0.0],
+        FOCUS,
+        &format!(
+            r##","layer":2,"bindings":[{{"binding_name":"#focus_visible","binding_name_override":"#visible"}},{{"binding_name":"#focus_{side}","binding_name_override":"#offset"}},{{"binding_name":"{length}","binding_name_override":"{axis}"}}]"##
+        ),
+    )
+    .replace(r#""radius":3"#, r#""radius":0.75"#)
+}
+
+/// `panel` drawn right above the card's background. Layers add up through parents, so a panel
+/// of layer 2 holding a rectangle of layer 1 would be drawn at 3, above the focus frame and
+/// the hover highlight (layer 2), and hide them.
+fn behind(panel: String) -> String {
+    panel.replacen(r#""layer":2"#, r#""layer":0"#, 1)
+}
+
+/// The panels behind each page's settings. They sit below the hover highlight and the focus
+/// frame, which a panel on top of them would hide.
+fn sections() -> String {
+    let pad = 4.0;
+    let first = LOOK_CAPTION_Y - pad;
+    let options = OPTIONS_CAPTION_Y - pad;
+    let row_end = |y: f32| y + BUTTON_H + pad;
+    let fill_row = ROW_Y + ROW_STEP * 2.0;
+    let block = behind(shown_by(
+        "sections_block",
+        "block_settings",
+        &[
+            section("look", first, row_end(fill_row)),
+            section("options", options, row_end(HIGHLIGHT_Y)),
+        ],
+    ));
+    // The mob page has no Fill row and no highlight fix, and its options sit one row higher.
+    let mob = behind(shown_by(
+        "sections_mob",
+        "mob_settings",
+        &[
+            section("look", first, row_end(ROW_Y + ROW_STEP)),
+            section("options", options - MOB_OPTIONS_SHIFT, row_end(BOTTOM_Y - MOB_OPTIONS_SHIFT)),
+        ],
+    ));
+    let counter = behind(shown_when(
+        "counter_page",
+        &[
+            section("display", EDIT_Y - pad, row_end(COUNTER_BOW_Y)),
+            section("place", COUNTER_CAPTION_Y - pad, row_end(COUNTER_RESET_Y)),
+        ],
+    ));
+    let zoom = behind(shown_when(
+        "zoom_page",
+        &[
+            section("controls", EDIT_Y - pad, row_end(ZOOM_SENS_Y)),
+            section("feel", ZOOM_CAPTION_Y - pad, row_end(ZOOM_RESET_Y)),
+        ],
+    ));
+    // The colour tools: the picker (bars, wheel, hex code) and the colours to pick from.
+    let colour = behind(shown_by(
+        "sections_colour",
+        "colour",
+        &[
+            section("picker", RGB_Y - pad, WHEEL[1] + WHEEL[2] + pad),
+            section("palette", SWATCH_Y - pad, FAVOURITE_Y + 12.0 + BUTTON_H + pad),
+        ],
+    ));
+    let home = behind(shown_when(
+        "home",
+        &[
+            section("lighting", HOME_LIGHT_CAPTION_Y - pad, row_end(HOME_FULLBRIGHT_KEY_Y)),
+            section("menu", HOME_MENU_CAPTION_Y - pad, row_end(HOME_KEY_Y)),
+        ],
+    ));
+    format!("{block},{mob},{counter},{zoom},{colour},{home}")
+}
+
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned
 /// to the right edge of the screen; below its top controls it shows either the settings or the
 /// colour tools.
 pub(super) fn document() -> String {
-    let card = vec![
+    let card = [
+        // A light edge round the card, so it stands out against any scenery.
+        rect(
+            "border",
+            &format!("[{},{}]", SETTINGS_W + 2.0, CARD_H + 2.0),
+            [-1.0, -1.0],
+            BORDER,
+            r##","layer":1,"bindings":[{"binding_name":"#card_border_height","binding_name_override":"#size_binding_y_absolute"}]"##,
+        )
+        .replace(r#""radius":3"#, r#""radius":8"#),
         // As tall as the page shown (`#card_height`), from the top of the card.
         rect(
             "background",
@@ -650,6 +1115,7 @@ pub(super) fn document() -> String {
             r##","layer":1,"bindings":[{"binding_name":"#card_height","binding_name_override":"#size_binding_y_absolute"}]"##,
         )
         .replace(r#""radius":3"#, r#""radius":7"#),
+        sections(),
         rect(
             "hover",
             "[10,10]",
@@ -657,6 +1123,19 @@ pub(super) fn document() -> String {
             [1.0, 1.0, 1.0, 0.08],
             r##","layer":2,"bindings":[{"binding_name":"#hover_visible","binding_name_override":"#visible"},{"binding_name":"#hover_offset","binding_name_override":"#offset"},{"binding_name":"#hover_width","binding_name_override":"#size_binding_x_absolute"},{"binding_name":"#hover_height","binding_name_override":"#size_binding_y_absolute"}]"##,
         ),
+        // The keyboard focus frame: a faint tint behind the focused control and a thin outline
+        // round it, so a slider or anything else stays in plain sight.
+        rect(
+            "focus",
+            "[10,10]",
+            [0.0, 0.0],
+            FOCUS_TINT,
+            r##","layer":2,"bindings":[{"binding_name":"#focus_visible","binding_name_override":"#visible"},{"binding_name":"#focus_offset","binding_name_override":"#offset"},{"binding_name":"#focus_width","binding_name_override":"#size_binding_x_absolute"},{"binding_name":"#focus_height","binding_name_override":"#size_binding_y_absolute"}]"##,
+        ),
+        focus_edge("focus_top", "top", false),
+        focus_edge("focus_bottom", "bottom", false),
+        focus_edge("focus_left", "left", true),
+        focus_edge("focus_right", "right", true),
         format!(
             r#"{{"top":{{"type":"panel","size":["100%","100%"],"anchor_from":"top_left","anchor_to":"top_left","layer":2,"controls":[{}]}}}}"#,
             top_controls().join(",")
@@ -669,6 +1148,8 @@ pub(super) fn document() -> String {
             r##"{{"colour":{{"type":"panel","size":["100%","100%"],"anchor_from":"top_left","anchor_to":"top_left","layer":2,"bindings":[{{"binding_name":"#colour_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}}"##,
             colour_column().join(",")
         ),
+        shown_when("counter_page", &counter_controls()),
+        shown_when("zoom_page", &zoom_controls()),
         // Hover help: hidden until the mod shows it next to the pointer.
         format!(
             r##"{{"tip":{{"type":"panel","size":[{TIP_WIDTH},14],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","layer":20,"bindings":[{{"binding_name":"#tip_visible","binding_name_override":"#visible"}},{{"binding_name":"#tip_offset","binding_name_override":"#offset"}}],"controls":[{},{}]}}}}"##,
@@ -677,7 +1158,8 @@ pub(super) fn document() -> String {
         ),
     ];
     format!(
-        r##"{{"namespace":"block_outline","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"controls":[{}]}}}}]}}}}"##,
-        card.join(",")
+        r##"{{"namespace":"block_outline","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"bindings":[{{"binding_name":"#card_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}},{}]}},"cell":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","radius":0,"layer":1}}}}"##,
+        card.join(","),
+        moving_guides()
     )
 }

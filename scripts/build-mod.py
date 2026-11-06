@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Block Outline as an importable Cinnabar WebAssembly component and install it."""
+"""Build Boldy Mods (block-outline.wasm) as an importable Cinnabar WebAssembly component and install it."""
 
 from pathlib import Path
 import os
@@ -87,7 +87,7 @@ def retire_old_name(mods: Path, stem: str) -> None:
     try:
         old.unlink()
         old_settings.unlink(missing_ok=True)
-        print(f"Removed the old {old.name}; allow Block Outline's permissions again in Cinnabar.")
+        print(f"Removed the old {old.name}; allow Boldy Mods' permissions again in Cinnabar.")
     except OSError as error:
         print(f"Could not remove {old} ({error}); close Cinnabar and build again.")
 

@@ -39,6 +39,10 @@ pub struct Settings {
     pub favourites: [Option<[u8; 4]>; FAVOURITES],
     /// The slot the next Save writes, oldest first.
     pub next_favourite: u8,
+    /// The HUD arrow counter, set on the menu's Arrow counter page.
+    pub counter: crate::counter::Counter,
+    /// Zoom, set on the menu's Zoom page.
+    pub zoom: crate::zoom::Zoom,
 }
 
 /// The aimed mob's default colour: a clear red.
@@ -177,6 +181,8 @@ impl Default for Settings {
             fullbright_key: None,
             favourites: [None; FAVOURITES],
             next_favourite: 0,
+            counter: crate::counter::Counter::default(),
+            zoom: crate::zoom::Zoom::default(),
         }
     }
 }
@@ -278,6 +284,46 @@ impl Settings {
         if let Some(reach) = number_field(json, "reach") {
             settings.reach = reach.clamp(MIN_REACH, MAX_REACH);
         }
+        if let Some(on) = bool_field(json, "zoom") {
+            settings.zoom.on = on;
+        }
+        if let Some(toggle) = bool_field(json, "zoom_toggle") {
+            settings.zoom.toggle = toggle;
+        }
+        if let Some(scroll) = bool_field(json, "zoom_scroll") {
+            settings.zoom.scroll = scroll;
+        }
+        if let Some(sensitivity) = bool_field(json, "zoom_sensitivity") {
+            settings.zoom.sensitivity = sensitivity;
+        }
+        if let Some(level) = number_field(json, "zoom_level") {
+            settings.zoom.level = crate::zoom::clamp_level(level);
+        }
+        if let Some(time) = number_field(json, "zoom_time") {
+            settings.zoom.time = crate::zoom::clamp_time(time);
+        }
+        if let Some(step) = number_field(json, "zoom_step") {
+            settings.zoom.step = crate::zoom::clamp_step(step);
+        }
+        // An empty (or unusable) name is an unbound key, as for the light key.
+        if let Some(key) = string_field(json, "zoom_key") {
+            settings.zoom.key = KeyName::new(key);
+        }
+        if let Some(on) = bool_field(json, "arrow_counter") {
+            settings.counter.on = on;
+        }
+        if let Some(bow_only) = bool_field(json, "arrow_counter_bow_only") {
+            settings.counter.bow_only = bow_only;
+        }
+        if let (Some(x), Some(y)) = (
+            number_field(json, "arrow_counter_x"),
+            number_field(json, "arrow_counter_y"),
+        ) {
+            settings.counter.pos = crate::counter::clamp_pos([x, y]);
+        }
+        if let Some(scale) = number_field(json, "arrow_counter_scale") {
+            settings.counter.scale = crate::counter::clamp_scale(scale);
+        }
         settings
     }
 
@@ -329,6 +375,22 @@ impl Settings {
         field("favourites", format!("\"{}\"", favourites.join(",")));
         field("next_favourite", self.next_favourite.to_string());
         field("reach", self.reach.to_string());
+        field("zoom", self.zoom.on.to_string());
+        field("zoom_toggle", self.zoom.toggle.to_string());
+        field("zoom_scroll", self.zoom.scroll.to_string());
+        field("zoom_sensitivity", self.zoom.sensitivity.to_string());
+        field("zoom_level", self.zoom.level.to_string());
+        field("zoom_time", self.zoom.time.to_string());
+        field("zoom_step", self.zoom.step.to_string());
+        field(
+            "zoom_key",
+            format!("\"{}\"", self.zoom.key.as_ref().map_or("", KeyName::as_str)),
+        );
+        field("arrow_counter", self.counter.on.to_string());
+        field("arrow_counter_bow_only", self.counter.bow_only.to_string());
+        field("arrow_counter_x", self.counter.pos[0].to_string());
+        field("arrow_counter_y", self.counter.pos[1].to_string());
+        field("arrow_counter_scale", self.counter.scale.to_string());
         field("menu_key", format!("\"{}\"", self.menu_key.as_str()));
         out.truncate(out.len() - 2);
         out.push_str(
@@ -351,6 +413,8 @@ impl Settings {
             highlight_cancel: self.highlight_cancel,
             favourites: self.favourites,
             next_favourite: self.next_favourite,
+            counter: self.counter,
+            zoom: self.zoom,
             ..Self::default()
         };
     }
@@ -1364,6 +1428,23 @@ mod tests {
             fullbright_key: KeyName::new("KeyB"),
             favourites: [Some([9, 8, 7, 6]), None, Some([255, 0, 0, 255]), None],
             next_favourite: 3,
+            counter: crate::counter::Counter {
+                on: false,
+                bow_only: true,
+                pos: [0.3, 0.6],
+                scale: 2.5,
+            },
+            zoom: crate::zoom::Zoom {
+                on: false,
+                toggle: true,
+                scroll: false,
+                sensitivity: false,
+                level: 6.5,
+                time: 0.4,
+                step: 35,
+                // Unbound: written as an empty name and read back as none.
+                key: None,
+            },
         };
         assert_eq!(Settings::parse(&s.to_json()), s);
         let legacy = Settings::parse(r#"{"color": "rainbow", "width": 3, "reach": 6}"#);
@@ -1700,8 +1781,10 @@ mod tests {
 
     #[test]
     fn favourites_reset_and_pulse() {
-        let mut s = Settings::default();
-        s.menu_key = KeyName::new("KeyG").unwrap();
+        let mut s = Settings {
+            menu_key: KeyName::new("KeyG").unwrap(),
+            ..Settings::default()
+        };
         for index in 0..5u8 {
             s.save_favourite([index, 0, 0, 255]);
         }
@@ -1722,10 +1805,7 @@ mod tests {
         s.pulse = true;
         let range = (0..60).map(|i| s.pulse_factor(i as f32 * 0.05));
         let (low, high) = range.fold((1.0f32, 0.0f32), |(lo, hi), v| (lo.min(v), hi.max(v)));
-        assert!(
-            low >= 0.45 - 1e-3 && low < 0.5 && high > 0.99,
-            "{low} {high}"
-        );
+        assert!((0.45 - 1e-3..0.5).contains(&low) && high > 0.99, "{low} {high}");
     }
 
     #[test]

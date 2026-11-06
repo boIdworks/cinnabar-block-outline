@@ -4,19 +4,43 @@ use super::*;
 
 /// Applies one control event to the settings or the menu state. Returns whether the menu should
 /// be redrawn; the caller saves the settings when they changed.
+///
+/// A reset button first asks "Sure? Click again"; the second click, with nothing else clicked in
+/// between, resets. The Reset in the counter's moving guide has no such step: it is right
+/// beside what it resets.
 pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     if !value.is_finite() {
         return false;
     }
+    let asked = match id {
+        "reset" => Reset::Page,
+        "counter_reset" if !state.moving => Reset::Counter,
+        "zoom_reset" => Reset::Zoom,
+        _ => Reset::None,
+    };
+    let was = state.confirm;
+    if asked != Reset::None && was != asked {
+        state.confirm = asked;
+        return true;
+    }
+    state.confirm = Reset::None;
+    let changed = apply_event(settings, state, id, value) || was != Reset::None;
+    // A page or view change leaves the focused control hidden: focus the new page's first.
+    settle_focus(settings, state);
+    changed
+}
+
+fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     match id {
-        "open_block" | "open_mob" => {
+        "open_block" | "open_mob" | "open_counter" | "open_zoom" => {
             if state.page != Page::Home {
                 return false;
             }
-            state.page = if id == "open_block" {
-                Page::Block
-            } else {
-                Page::Mob
+            state.page = match id {
+                "open_block" => Page::Block,
+                "open_mob" => Page::Mob,
+                "open_zoom" => Page::Zoom,
+                _ => Page::Counter,
             };
             state.colour_open = false;
             state.editing_fill = false;
@@ -27,6 +51,7 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
             if state.page == Page::Home {
                 return false;
             }
+            state.moving = false;
             commit_typing(settings, state);
             // One step back: from the colour tools to the page, from the page to the start.
             if state.colour_open {
@@ -39,6 +64,8 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         // Clicking another box applies what was typed in the previous one. Done here, on the
         // real settings: committing from inside a page's edit would be overwritten by it.
         _ if id.starts_with("type_") => commit_typing(settings, state),
+        _ if id.starts_with("counter") => return apply_counter(settings, state, id, value),
+        _ if id.starts_with("zoom") => return apply_zoom(settings, id, value),
         _ => {}
     }
     if state.page == Page::Mob {
@@ -48,6 +75,63 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         return changed;
     }
     apply_page(settings, state, id, value)
+}
+
+/// [`apply`] for the Arrow counter page and the Done button shown while moving the counter.
+fn apply_counter(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
+    use crate::counter::{Counter, DEFAULT_POS};
+    let before = (*settings, *state);
+    let counter = &mut settings.counter;
+    match id {
+        "counter" => counter.on = value > 0.5,
+        "counter_bow" => counter.bow_only = value > 0.5,
+        "counter_move" => {
+            // Something to drag: moving shows the counter even while it is off.
+            counter.on = true;
+            state.moving = true;
+        }
+        "counter_done" => state.moving = false,
+        "counter_size" => counter.scale = 1.0,
+        "counter_smaller" => counter.scale = Counter::stepped(counter.scale, -1.0),
+        "counter_bigger" => counter.scale = Counter::stepped(counter.scale, 1.0),
+        "counter_reset" => {
+            counter.pos = DEFAULT_POS;
+            counter.scale = 1.0;
+        }
+        _ => return false,
+    }
+    (*settings, *state) != before
+}
+
+/// [`apply`] for the Zoom page: switches, and values that step by one notch or reset.
+fn apply_zoom(settings: &mut Settings, id: &str, value: f32) -> bool {
+    use crate::zoom::{self, Zoom};
+    let before = *settings;
+    let defaults = Zoom::default();
+    let z = &mut settings.zoom;
+    match id {
+        "zoom" => z.on = value > 0.5,
+        "zoom_mode" => z.toggle = value > 0.5,
+        "zoom_scroll" => z.scroll = value > 0.5,
+        "zoom_sens" => z.sensitivity = value > 0.5,
+        "zoom_level" => z.level = defaults.level,
+        "zoom_level_less" => z.level = zoom::clamp_level(z.level - zoom::LEVEL_STEP),
+        "zoom_level_more" => z.level = zoom::clamp_level(z.level + zoom::LEVEL_STEP),
+        "zoom_time" => z.time = defaults.time,
+        "zoom_time_less" => z.time = zoom::clamp_time(z.time - zoom::TIME_STEP),
+        "zoom_time_more" => z.time = zoom::clamp_time(z.time + zoom::TIME_STEP),
+        "zoom_step" => z.step = defaults.step,
+        "zoom_step_less" => {
+            z.step = zoom::clamp_step(f32::from(z.step) - f32::from(zoom::STEP_STEP));
+        }
+        "zoom_step_more" => {
+            z.step = zoom::clamp_step(f32::from(z.step) + f32::from(zoom::STEP_STEP));
+        }
+        // Everything but the key the player chose.
+        "zoom_reset" => *z = Zoom { key: z.key, ..defaults },
+        _ => return false,
+    }
+    *settings != before
 }
 
 /// [`apply`] for the controls of a page, editing `settings` as the page shows them.
