@@ -1,0 +1,8 @@
+package wasi:cli@0.2.0;
+
+/// The subset of `wasi:cli` the recorder uses.
+interface stdout {
+    use wasi:io/streams@0.2.0.{output-stream};
+
+    get-stdout: func() -> output-stream;
+}

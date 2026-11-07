@@ -1,0 +1,18 @@
+[package]
+name = "hive-autocs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Hive Auto CS: a Cinnabar packet mod that sets up Bedwars Squads custom servers on The Hive"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mod-api.workspace = true
+wit-bindgen = "=0.57.1"
+serde_json = "=1.0.150"
+# Cinnabar's generated Bedrock 1.26.60 codec, for rewriting the server's command list.
+bedrock-protocol = { package = "bedrock-protocol-contract-1-26-60", git = "https://github.com/cinnabar-mc/cinnabar", rev = "8064f58fba3f2f504a0d5be82dfc32906d7ce49b" }

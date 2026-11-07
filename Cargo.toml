@@ -1,5 +1,5 @@
 [workspace]
-members = ["mods/block-outline", "mods/block-outline/pack"]
+members = ["mods/block-outline", "mods/block-outline/pack", "mods/hive-autocs", "mods/hive-autocs/pack"]
 default-members = ["mods/block-outline"]
 resolver = "3"
 

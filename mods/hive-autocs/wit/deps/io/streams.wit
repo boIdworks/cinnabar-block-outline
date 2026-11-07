@@ -1,0 +1,19 @@
+package wasi:io@0.2.0;
+
+/// The subset of `wasi:io` the recorder uses.
+interface error {
+    resource error;
+}
+
+interface streams {
+    use error.{error};
+
+    variant stream-error {
+        last-operation-failed(error),
+        closed,
+    }
+
+    resource output-stream {
+        blocking-write-and-flush: func(contents: list<u8>) -> result<_, stream-error>;
+    }
+}
