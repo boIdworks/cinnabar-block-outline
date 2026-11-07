@@ -45,6 +45,12 @@ pub struct Settings {
     pub zoom: crate::zoom::Zoom,
     /// The clicks-per-second readout, set on the menu's Arrow counter page.
     pub cps: crate::cps::Cps,
+    /// The jump reset timing readout, set on the menu's Jump reset page.
+    pub jump_reset: crate::jumpreset::JumpReset,
+    /// Whether the block outline is drawn; switched on the menu's start page.
+    pub block_on: bool,
+    /// Whether mob hitboxes are drawn; switched on the menu's start page.
+    pub mob_on: bool,
 }
 
 /// The aimed mob's default colour: a clear red.
@@ -186,6 +192,9 @@ impl Default for Settings {
             counter: crate::counter::Counter::default(),
             zoom: crate::zoom::Zoom::default(),
             cps: crate::cps::Cps::default(),
+            jump_reset: crate::jumpreset::JumpReset::default(),
+            block_on: true,
+            mob_on: true,
         }
     }
 }
@@ -266,6 +275,12 @@ impl Settings {
         }
         if let Some(key) = string_field(json, "fullbright_key") {
             settings.fullbright_key = KeyName::new(key);
+        }
+        if let Some(on) = bool_field(json, "block_on") {
+            settings.block_on = on;
+        }
+        if let Some(on) = bool_field(json, "mob_on") {
+            settings.mob_on = on;
         }
         if let Some(all) = bool_field(json, "show_all_mobs") {
             settings.show_all_mobs = all;
@@ -363,6 +378,22 @@ impl Settings {
         if let Some(scale) = number_field(json, "cps_scale") {
             settings.cps.scale = crate::cps::clamp_scale(scale);
         }
+        if let Some(on) = bool_field(json, "jump_reset") {
+            settings.jump_reset.on = on;
+        }
+        if let Some(window) = number_field(json, "jump_reset_window") {
+            // Whole milliseconds, on a step like the menu's buttons keep it.
+            settings.jump_reset.window = crate::jumpreset::JumpReset::stepped(
+                window.round().clamp(0.0, f32::from(u16::MAX)) as u16,
+                0,
+            );
+        }
+        if let Some(knockback) = number_field(json, "jump_reset_carry") {
+            settings.jump_reset.knockback = crate::jumpreset::clamp_knockback(knockback);
+        }
+        if let Some(log) = string_field(json, "jump_reset_log") {
+            settings.jump_reset.log = crate::jumpreset::Log::parse(log);
+        }
         settings
     }
 
@@ -399,6 +430,8 @@ impl Settings {
         field("mob_color", format!("\"{}\"", hex_code_full(self.mob.rgba)));
         field("mob_rainbow", self.mob.rainbow.to_string());
         field("mob_width", self.mob.width.to_string());
+        field("block_on", self.block_on.to_string());
+        field("mob_on", self.mob_on.to_string());
         field("show_all_mobs", self.show_all_mobs.to_string());
         field("fullbright", self.fullbright.to_string());
         field(
@@ -452,6 +485,13 @@ impl Settings {
             format!("\"{}\"", self.cps.pos.anchor[1].name()),
         );
         field("cps_scale", self.cps.scale.to_string());
+        field("jump_reset", self.jump_reset.on.to_string());
+        field("jump_reset_window", self.jump_reset.window.to_string());
+        field("jump_reset_carry", self.jump_reset.knockback.to_string());
+        field(
+            "jump_reset_log",
+            format!("\"{}\"", self.jump_reset.log.to_text()),
+        );
         field("menu_key", format!("\"{}\"", self.menu_key.as_str()));
         out.truncate(out.len() - 2);
         out.push_str(
@@ -477,6 +517,9 @@ impl Settings {
             counter: self.counter,
             zoom: self.zoom,
             cps: self.cps,
+            jump_reset: self.jump_reset,
+            block_on: self.block_on,
+            mob_on: self.mob_on,
             ..Self::default()
         };
     }
@@ -700,6 +743,11 @@ fn field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
+/// The text value of `key` in a settings file, for extras the settings do not hold.
+pub fn text_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    string_field(json, key)
+}
+
 fn string_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     let value = field(json, key)?.strip_prefix('"')?;
     Some(&value[..value.find('"')?])
@@ -722,6 +770,25 @@ fn number_field(json: &str, key: &str) -> Option<f32> {
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')))
         .unwrap_or(value.len());
     value[..end].parse::<f32>().ok().filter(|v| v.is_finite())
+}
+
+/// Whether any part of the box `min`..`max` can be in front of the viewer at `eye` looking along
+/// `dir` (a unit vector): the box's furthest corner along `dir` is past the plane through the eye.
+/// A box wholly behind that plane cannot be on screen, so it need not be drawn. Boxes that straddle
+/// the plane, or come out as nonsense, are kept.
+pub fn in_front_of(min: [f64; 3], max: [f64; 3], eye: [f64; 3], dir: [f64; 3]) -> bool {
+    let furthest: f64 = (0..3)
+        .map(|axis| {
+            let corner = if dir[axis] >= 0.0 {
+                max[axis]
+            } else {
+                min[axis]
+            };
+            (corner - eye[axis]) * dir[axis]
+        })
+        .sum();
+    // A little slack, so a box right at the plane is never dropped for rounding.
+    !furthest.is_finite() || furthest > -0.05
 }
 
 /// View direction for actor YXZ radians: yaw turns left, pitch up, forward is -Z.
@@ -1044,7 +1111,7 @@ pub fn target(
     reach: f64,
     mut lookup: impl FnMut([i32; 3]) -> Cell,
 ) -> Option<Hit> {
-    match target_with_actors(origin, dir, reach, &mut lookup, &[]) {
+    match target_with_actors(origin, dir, reach, &mut lookup, NO_ACTORS) {
         Some(Target::Block(hit)) => Some(hit),
         _ => None,
     }
@@ -1058,6 +1125,59 @@ pub enum Target {
     Actor(Hit),
 }
 
+/// One actor's hitbox: the single box around all of it, `[min x, min y, min z, max x, max y,
+/// max z]`. A fixed array, because a list per actor per frame costs allocations the frame's fuel
+/// cannot spare.
+pub type ActorBox = [[f64; 6]; 1];
+
+/// No actors, typed.
+pub const NO_ACTORS: &[ActorBox] = &[];
+
+/// The most hitboxes [`nearest_mob_boxes`] can return.
+pub const MOB_BOX_CAP: usize = 16;
+
+/// The hitboxes within `range` blocks of `eye`, nearest first (by the distance to the nearest
+/// point of the box), at most `limit` (and [`MOB_BOX_CAP`]). With a view direction the ones wholly
+/// behind the viewer are left out ([`in_front_of`]). Picks in one pass into a small fixed buffer:
+/// no list of every candidate, no sort.
+pub fn nearest_mob_boxes<A: AsRef<[[f64; 6]]>>(
+    actors: &[A],
+    eye: [f64; 3],
+    view: Option<[f64; 3]>,
+    range: f64,
+    limit: usize,
+) -> Vec<[[f64; 3]; 2]> {
+    let limit = limit.min(MOB_BOX_CAP);
+    let mut best = [(0.0f64, [[0.0f64; 3]; 2]); MOB_BOX_CAP];
+    let mut count = 0;
+    for b in actors.iter().flat_map(|boxes| boxes.as_ref()) {
+        let (min, max) = ([b[0], b[1], b[2]], [b[3], b[4], b[5]]);
+        // Distance from the eye to the nearest point of the box.
+        let gap: f64 = (0..3)
+            .map(|axis| {
+                (min[axis] - eye[axis])
+                    .max(eye[axis] - max[axis])
+                    .max(0.0)
+                    .powi(2)
+            })
+            .sum();
+        if gap > range * range || !view.is_none_or(|dir| in_front_of(min, max, eye, dir)) {
+            continue;
+        }
+        // Where it goes among the nearest so far: after every one at least as near, so equal
+        // distances keep the order they came in.
+        let at = best[..count].partition_point(|(other, _)| *other <= gap);
+        if at >= limit {
+            continue;
+        }
+        let end = count.min(limit - 1);
+        best.copy_within(at..end, at + 1);
+        best[at] = (gap, [min, max]);
+        count = (count + 1).min(limit);
+    }
+    best[..count].iter().map(|(_, b)| *b).collect()
+}
+
 /// Padding Cinnabar adds to actor hitboxes when picking (`DEFAULT_ACTOR_PICK_RADIUS`).
 pub const ACTOR_PICK_RADIUS: f64 = 0.1;
 
@@ -1065,16 +1185,17 @@ pub const ACTOR_PICK_RADIUS: f64 = 0.1;
 /// nearest actor hit within `reach` wins when it is more than `ACTOR_PICK_RADIUS` in front of
 /// the block, and then nothing behind it is outlined, bridging support included. Each actor is
 /// a list of world-space boxes; boxes around the eye (the player's own body) are skipped.
-pub fn target_with_actors(
+pub fn target_with_actors<A: AsRef<[[f64; 6]]>>(
     origin: [f64; 3],
     dir: [f64; 3],
     reach: f64,
     mut lookup: impl FnMut([i32; 3]) -> Cell,
-    actors: &[Vec<[f64; 6]>],
+    actors: &[A],
 ) -> Option<Target> {
     let actor = actors
         .iter()
         .filter_map(|boxes| {
+            let boxes = boxes.as_ref();
             let padded = |b: &[f64; 6]| {
                 let r = ACTOR_PICK_RADIUS;
                 (
@@ -1520,13 +1641,153 @@ mod tests {
                 },
                 scale: 1.7,
             },
+            jump_reset: crate::jumpreset::JumpReset {
+                on: false,
+                window: 120,
+                knockback: 0.3,
+                log: {
+                    let mut log = crate::jumpreset::Log::new();
+                    log.push(crate::jumpreset::Row {
+                        offset_ms: Some(-40),
+                        knockback: 55,
+                        grounded: Some(true),
+                        speed: 130,
+                    });
+                    log
+                },
+            },
+            block_on: false,
+            mob_on: false,
         };
         assert_eq!(Settings::parse(&s.to_json()), s);
+        // A window typed by hand is rounded onto a step and kept in bounds.
+        let typed = |window: &str| {
+            Settings::parse(&format!(r#"{{"jump_reset_window": {window}}}"#))
+                .jump_reset
+                .window
+        };
+        assert_eq!(typed("77"), 75);
+        assert_eq!(typed("1"), crate::jumpreset::MIN_WINDOW);
+        assert_eq!(typed("99999"), crate::jumpreset::MAX_WINDOW);
+        let kb = |value: &str| {
+            Settings::parse(&format!(r#"{{"jump_reset_carry": {value}}}"#))
+                .jump_reset
+                .knockback
+        };
+        assert_eq!(kb("0.4"), 0.4);
+        assert_eq!(kb("0"), crate::jumpreset::MIN_KNOCKBACK);
+        assert_eq!(kb("9"), crate::jumpreset::MAX_KNOCKBACK);
+        // Older files have no jump reset: it is on, at the default window.
+        assert_eq!(
+            Settings::parse("{}").jump_reset,
+            crate::jumpreset::JumpReset::default()
+        );
         let legacy = Settings::parse(r#"{"color": "rainbow", "width": 3, "reach": 6}"#);
         assert!(legacy.rainbow);
         assert_eq!(legacy.rgba, Settings::default().rgba);
         let saved = Settings::parse(r##"{"color": "#50FF3CFF", "width": 3, "reach": 6}"##);
         assert_eq!(saved.rgba, [0x50, 0xFF, 0x3C, 0xFF]);
+    }
+
+    #[test]
+    fn the_nearest_mob_boxes_come_nearest_first_within_range_and_the_cap() {
+        let eye = [0.0, 1.6, 0.0];
+        let at = |x: f64, z: f64| -> ActorBox { [[x - 0.3, 0.0, z - 0.3, x + 0.3, 1.8, z + 0.3]] };
+        let actors = [
+            at(5.0, 0.0),
+            at(2.0, 0.0),
+            at(30.0, 0.0),
+            at(3.0, 4.0),
+            at(-1.0, 0.0),
+        ];
+        let nearest = |view, range, limit| nearest_mob_boxes(&actors, eye, view, range, limit);
+        let xs = |boxes: &[[[f64; 3]; 2]]| -> Vec<i32> {
+            boxes
+                .iter()
+                .map(|b| ((b[0][0] + b[1][0]) / 2.0).round() as i32)
+                .collect()
+        };
+        // Nearest first, the one 30 blocks away outside a range of 12.
+        assert_eq!(xs(&nearest(None, 12.0, 8)), [-1, 2, 3, 5]);
+        // The cap keeps the nearest.
+        assert_eq!(xs(&nearest(None, 12.0, 2)), [-1, 2]);
+        assert_eq!(xs(&nearest(None, 12.0, 1)), [-1]);
+        assert!(nearest(None, 12.0, 0).is_empty());
+        // Nothing in range, nothing returned.
+        assert!(nearest(None, 0.5, 8).is_empty());
+        // Looking along +X, what is at -X is behind and is left out; the cap then goes to the rest.
+        let along_x = Some([1.0, 0.0, 0.0]);
+        assert_eq!(xs(&nearest(along_x, 12.0, 8)), [2, 3, 5]);
+        assert_eq!(xs(&nearest(along_x, 12.0, 2)), [2, 3]);
+        // Equal distances keep the order they came in.
+        let twins = [at(3.0, 0.0), at(-3.0, 0.0), at(0.0, 3.0)];
+        let order = nearest_mob_boxes(&twins, eye, None, 12.0, 8);
+        assert_eq!(order.len(), 3);
+        assert!(
+            order[0][0][0] > 2.0 && order[1][1][0] < -2.0,
+            "first come, first kept"
+        );
+        // Several boxes in one actor all count; an empty actor adds nothing.
+        let many = [
+            vec![
+                [0.0, 0.0, 2.0, 1.0, 1.0, 3.0],
+                [0.0, 0.0, 6.0, 1.0, 1.0, 7.0],
+            ],
+            vec![],
+        ];
+        assert_eq!(nearest_mob_boxes(&many, eye, None, 12.0, 8).len(), 2);
+        // Far more than the cap in, never more than the cap out.
+        let crowd: Vec<ActorBox> = (0..40).map(|n| at(f64::from(n) * 0.2, 1.0)).collect();
+        assert_eq!(
+            nearest_mob_boxes(&crowd, eye, None, 12.0, 100).len(),
+            MOB_BOX_CAP
+        );
+        let nearest16 = nearest_mob_boxes(&crowd, eye, None, 12.0, 100);
+        assert!(
+            nearest16
+                .windows(2)
+                .all(|pair| pair[0][0][0] <= pair[1][0][0])
+        );
+    }
+
+    #[test]
+    fn boxes_wholly_behind_the_viewer_are_skipped() {
+        let eye = [0.0, 1.6, 0.0];
+        let ahead = look_direction(0.0, 0.0);
+        let one = |centre: [f64; 3]| {
+            (
+                [centre[0] - 0.3, centre[1] - 0.9, centre[2] - 0.3],
+                [centre[0] + 0.3, centre[1] + 0.9, centre[2] + 0.3],
+            )
+        };
+        let seen = |centre: [f64; 3], dir: [f64; 3]| {
+            let (min, max) = one(centre);
+            in_front_of(min, max, eye, dir)
+        };
+        // Looking along -Z: a mob ahead is in front, one behind is not, to the side it is.
+        assert!(seen([0.0, 1.0, -5.0], ahead));
+        assert!(!seen([0.0, 1.0, 5.0], ahead));
+        assert!(
+            seen([6.0, 1.0, -0.2], ahead),
+            "off to the side, slightly ahead"
+        );
+        // Straight to the side and a little behind still straddles with its width.
+        assert!(seen([3.0, 1.0, 0.2], ahead));
+        // Right on top of you, or around you, is kept.
+        assert!(seen([0.0, 1.0, 0.0], ahead));
+        // Turning round flips it.
+        let back = look_direction(std::f32::consts::PI, 0.0);
+        assert!(!seen([0.0, 1.0, -5.0], back));
+        assert!(seen([0.0, 1.0, 5.0], back));
+        // Looking up or down: a mob below you while looking up is behind the plane.
+        let up = look_direction(0.0, 1.4);
+        assert!(!seen([0.0, -6.0, -0.5], up));
+        assert!(seen([0.0, 6.0, -0.5], up));
+        // Every corner counts: a long box reaching in front of the plane is in front.
+        assert!(in_front_of([-0.3, 0.7, -4.0], [0.3, 2.5, 4.0], eye, ahead));
+        // Nonsense in, kept: nothing is hidden on a guess.
+        assert!(in_front_of([f64::NAN; 3], [1.0; 3], eye, ahead));
+        assert!(in_front_of([0.0; 3], [1.0; 3], eye, [f64::NAN, 0.0, 0.0]));
     }
 
     #[test]
@@ -1846,7 +2107,7 @@ mod tests {
             }
         };
         let eye = [0.5, 65.62, 0.3];
-        assert!(target_with_actors(eye, steep, 5.7, floor, &[]).is_some());
+        assert!(target_with_actors(eye, steep, 5.7, floor, NO_ACTORS).is_some());
         let mob_below = vec![[0.0, 63.0, -1.0, 1.0, 64.0, 0.0]];
         assert!(matches!(
             target_with_actors(eye, steep, 5.7, floor, &[mob_below]),
@@ -2019,7 +2280,7 @@ mod tests {
             }
         };
         let eye = [0.5, 64.5, 0.5];
-        match target_with_actors(eye, [0.0, 0.0, -1.0], 5.7, wall, &[]) {
+        match target_with_actors(eye, [0.0, 0.0, -1.0], 5.7, wall, NO_ACTORS) {
             Some(Target::Block(hit)) => assert!(hit.direct),
             other => panic!("{other:?}"),
         }

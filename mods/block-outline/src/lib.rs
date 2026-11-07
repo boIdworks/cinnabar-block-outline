@@ -6,6 +6,7 @@ pub mod cps;
 #[cfg(target_arch = "wasm32")]
 mod guest;
 pub mod hudedit;
+pub mod jumpreset;
 pub mod outline;
 pub mod panel;
 pub mod zoom;

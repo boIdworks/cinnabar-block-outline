@@ -267,6 +267,21 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     digits(&mut size, (cps.scale * 100.0).round().max(0.0) as u64);
     size.push_str("%%");
     toggle(out, "cps_size", &size, false);
+    let jump = settings.jump_reset;
+    toggle(
+        out,
+        "jump_on",
+        if jump.on {
+            "Jump reset: On"
+        } else {
+            "Jump reset: Off"
+        },
+        jump.on,
+    );
+    let mut window = String::from("Perfect window: ");
+    digits(&mut window, u64::from(jump.window));
+    window.push_str(" ms");
+    toggle(out, "jump_window", &window, false);
     let zoom = settings.zoom;
     toggle(
         out,
@@ -339,6 +354,10 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("zoom_step", zoom.step != defaults.step),
         ("counter_size", counter.scale != 1.0),
         ("cps_size", cps.scale != 1.0),
+        (
+            "jump_window",
+            jump.window != crate::jumpreset::DEFAULT_WINDOW,
+        ),
     ] {
         out.push_str("\"#");
         out.push_str(name);
@@ -355,6 +374,16 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     out.push_str(r##","#open_counter_color":[0.82,0.68,0.47,1],"##);
     // The CPS button's mouse and the Lighting button's sun.
     out.push_str(r##""#open_cps_color":[0.6,0.9,0.65,1],"#open_light_color":[1,0.88,0.45,1],"##);
+    // The Jump reset button's arrow.
+    out.push_str(r##""#open_jump_color":[1,0.55,0.5,1],"##);
+    // The start page's switches.
+    toggle(out, "home_block", "", settings.block_on);
+    toggle(out, "home_mob", "", settings.mob_on);
+    toggle(out, "home_counter", "", counter.on);
+    toggle(out, "home_cps", "", cps.on);
+    toggle(out, "home_zoom", "", zoom.on);
+    toggle(out, "home_light", "", settings.fullbright);
+    toggle(out, "home_jump", "", jump.on);
     out.push_str(r##""#fuel_text":""##);
     fuel_text(out, state);
     out.push_str(r##"","#title_text":""##);
@@ -367,6 +396,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         Page::Cps => "CPS counter",
         Page::Zoom => "Zoom",
         Page::Lighting => "Lighting",
+        Page::JumpReset => "Jump reset",
     };
     if state.page.outline() && state.colour_open {
         out.push_str(if state.page == Page::Mob {
@@ -409,6 +439,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     flag(out, "cps_page_visible", state.page == Page::Cps);
     flag(out, "zoom_page_visible", state.page == Page::Zoom);
     flag(out, "light_page_visible", state.page == Page::Lighting);
+    flag(out, "jump_page_visible", state.page == Page::JumpReset);
     flag(out, "card_visible", !state.moving);
     flag(
         out,

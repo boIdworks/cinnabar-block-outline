@@ -675,6 +675,8 @@ pub(crate) const DOCUMENT: &str = concat!(
     r##"{"namespace":"boldy_hud","root":{"type":"panel","size":["100%","100%"],"controls":["##,
     crate::cps::document!(),
     ",",
+    crate::jumpreset::document!(),
+    ",",
     // While moving: the guide lines the element snapped to.
     r##"{"guide_x":{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[1,"100%"],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","radius":0,"color":[0.7,0.45,1,0.85],"layer":1,"bindings":["##,
     r##"{"binding_name":"#guide_x_visible","binding_name_override":"#visible"},"##,
@@ -791,6 +793,8 @@ pub fn surface() -> String {
     initial.pop();
     initial.push_str(r##","#arrow_item":{"item":{"identifier":"minecraft:arrow","metadata":0}},"##);
     initial.push_str(&crate::cps::initial_bindings());
+    initial.push(',');
+    initial.push_str(&crate::jumpreset::initial_bindings());
     initial.push('}');
     out.push_str(r#","bindings":"#);
     out.push_str(&initial);
@@ -1022,6 +1026,7 @@ mod tests {
             !DOCUMENT.contains(",]") && !DOCUMENT.contains(",}"),
             "no trailing commas"
         );
+        assert!(DOCUMENT.contains("#jumpreset_text"));
         for prefix in ["arrows", "cpsedit"] {
             assert!(DOCUMENT.contains(&format!("#{prefix}_handle_3_offset")));
             assert!(DOCUMENT.contains(&format!("#{prefix}_size_offset")));

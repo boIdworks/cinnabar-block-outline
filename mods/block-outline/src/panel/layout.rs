@@ -580,14 +580,14 @@ pub(super) fn home_controls() -> Vec<String> {
             children.push(label(
                 "name",
                 title,
-                [SETTINGS_W - 70.0, 10.0],
+                [HOME_BUTTON_W - 46.0, 10.0],
                 [badge * 2.0 + BADGE, 3.5],
                 TEXT,
             ));
             children.push(label(
                 "about",
                 about,
-                [SETTINGS_W - 70.0, 10.0],
+                [HOME_BUTTON_W - 46.0, 10.0],
                 [badge * 2.0 + BADGE, 15.0],
                 DIM,
             ));
@@ -595,12 +595,12 @@ pub(super) fn home_controls() -> Vec<String> {
                 "arrow",
                 ">",
                 [10.0, 10.0],
-                [SETTINGS_W - 34.0, 9.0],
+                [HOME_BUTTON_W - 14.0, 9.0],
                 TEXT,
             ));
             button(
                 name,
-                [10.0, y, SETTINGS_W - 20.0, HOME_BUTTON_H],
+                [10.0, y, HOME_BUTTON_W, HOME_BUTTON_H],
                 &format!("mod.control:{control}"),
                 &children,
             )
@@ -654,6 +654,21 @@ pub(super) fn home_controls() -> Vec<String> {
             "Lighting",
             HOME_ABOUT[5],
         ),
+        page_button(
+            "open_jump",
+            HOME_JUMP_Y,
+            OPEN_JUMP,
+            6,
+            "Jump reset",
+            HOME_ABOUT[6],
+        ),
+        home_switch("home_block", HOME_BLOCK_Y, HOME_BLOCK_ON),
+        home_switch("home_mob", HOME_MOB_Y, HOME_MOB_ON),
+        home_switch("home_counter", HOME_COUNTER_Y, HOME_COUNTER_ON),
+        home_switch("home_cps", HOME_CPS_Y, HOME_CPS_ON),
+        home_switch("home_zoom", HOME_ZOOM_Y, HOME_ZOOM_ON),
+        home_switch("home_light", HOME_LIGHT_Y, HOME_LIGHT_ON),
+        home_switch("home_jump", HOME_JUMP_Y, HOME_JUMP_ON),
         caption("menu_caption", "Menu", HOME_MENU_CAPTION_Y),
         label(
             "key_title",
@@ -676,6 +691,44 @@ pub(super) fn home_controls() -> Vec<String> {
             DIM,
         ),
     ]
+}
+
+/// A start page's on/off switch for the page button at `y`: a small switch on a button of its
+/// own, right of the page button. Bound by `#<name>_bg` and `#<name>_knob` like the others.
+fn home_switch(name: &str, y: f32, control: usize) -> String {
+    let mut off = String::new();
+    vector(&mut off, SWITCH_OFF);
+    let at = [
+        (HOME_SWITCH_W - PILL_W) / 2.0,
+        (HOME_BUTTON_H - PILL_H) / 2.0,
+    ];
+    let pill = format!(
+        r##"{{"pill":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{PILL_W},{PILL_H}],"anchor_from":"top_left","anchor_to":"top_left","offset":[{},{}],"radius":{},"color":{off},"layer":2,"bindings":[{{"binding_name":"#{name}_bg","binding_name_override":"#color"}}],"controls":[{{"knob":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{KNOB},{KNOB}],"anchor_from":"left_middle","anchor_to":"left_middle","offset":[{KNOB_OFF},0],"radius":{},"color":[1,1,1,1],"layer":1,"bindings":[{{"binding_name":"#{name}_knob","binding_name_override":"#offset"}}]}}}}]}}}}"##,
+        at[0],
+        at[1],
+        PILL_H / 2.0,
+        KNOB / 2.0,
+    );
+    button(
+        name,
+        [
+            10.0 + HOME_BUTTON_W + HOME_GAP,
+            y,
+            HOME_SWITCH_W,
+            HOME_BUTTON_H,
+        ],
+        &format!("mod.control:{control}"),
+        &[
+            rect(
+                "bg",
+                r#"["100%","100%"]"#,
+                [0.0, 0.0],
+                TRACK,
+                r#","layer":1"#,
+            ),
+            pill,
+        ],
+    )
 }
 
 /// The icon of a start page button, drawn from a few rectangles on the `BADGE` tile at `(at, at)`:
@@ -730,6 +783,16 @@ fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
             piece("i3", 10.5, 17.0, 1.0, 3.0, 0.0, true, 3),
             piece("i4", 2.0, 10.5, 3.0, 1.0, 0.0, true, 3),
             piece("i5", 17.0, 10.5, 3.0, 1.0, 0.0, true, 3),
+        ],
+        // An arrow pointing up over a ground line: a jump.
+        6 => vec![
+            piece("i0", 10.0, 4.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i1", 8.0, 6.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i2", 12.0, 6.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i3", 6.0, 8.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i4", 14.0, 8.0, 2.0, 2.0, 0.0, true, 3),
+            piece("i5", 10.0, 6.0, 2.0, 10.0, 0.5, true, 3),
+            piece("i6", 5.0, 18.0, 12.0, 1.5, 0.5, true, 3),
         ],
         // A mouse: an outlined body with the button split.
         4 => vec![
@@ -867,6 +930,36 @@ pub(super) fn cps_controls() -> Vec<String> {
         [10.0, CPS_RESET_Y, full, BUTTON_H],
         CPS_RESET,
     ));
+    page
+}
+
+/// The Jump reset page: on/off, the perfect window and a short note.
+pub(super) fn jump_controls() -> Vec<String> {
+    let mut page = vec![
+        switch_button(
+            "jump_on",
+            [10.0, JUMP_ON_Y, SETTINGS_W - 20.0, BUTTON_H],
+            JUMP_ON,
+            "Show timing",
+        ),
+        caption("jump_caption", "Timing", JUMP_CAPTION_Y),
+    ];
+    page.extend(stepper(
+        "jump_window",
+        JUMP_WINDOW_Y,
+        JUMP_WINDOW,
+        JUMP_WINDOW_LESS,
+        JUMP_WINDOW_MORE,
+    ));
+    for (index, line) in JUMP_NOTE.iter().enumerate() {
+        page.push(label(
+            &format!("jump_note_{index}"),
+            line,
+            [SETTINGS_W - 20.0, 10.0],
+            [10.0, JUMP_NOTE_Y + 12.0 * index as f32],
+            DIM,
+        ));
+    }
     page
 }
 
@@ -1321,6 +1414,13 @@ fn sections() -> String {
         "light_page",
         &[section("lighting", EDIT_Y - pad, row_end(LIGHT_KEY_Y))],
     ));
+    let jump = behind(shown_when(
+        "jump_page",
+        &[
+            section("display", EDIT_Y - pad, row_end(JUMP_ON_Y)),
+            section("timing", JUMP_CAPTION_Y - pad, row_end(JUMP_WINDOW_Y)),
+        ],
+    ));
     let zoom = behind(shown_when(
         "zoom_page",
         &[
@@ -1349,7 +1449,7 @@ fn sections() -> String {
             row_end(HOME_KEY_Y),
         )],
     ));
-    format!("{block},{mob},{counter},{cps},{zoom},{light},{colour},{home}")
+    format!("{block},{mob},{counter},{cps},{zoom},{light},{jump},{colour},{home}")
 }
 
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned
@@ -1412,6 +1512,7 @@ pub(super) fn document() -> String {
         shown_when("cps_page", &cps_controls()),
         shown_when("zoom_page", &zoom_controls()),
         shown_when("light_page", &lighting_controls()),
+        shown_when("jump_page", &jump_controls()),
         // Hover help: hidden until the mod shows it next to the pointer.
         format!(
             r##"{{"tip":{{"type":"panel","size":[{TIP_WIDTH},14],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","layer":20,"bindings":[{{"binding_name":"#tip_visible","binding_name_override":"#visible"}},{{"binding_name":"#tip_offset","binding_name_override":"#offset"}}],"controls":[{},{}]}}}}"##,

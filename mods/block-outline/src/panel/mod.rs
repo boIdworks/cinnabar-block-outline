@@ -90,6 +90,7 @@ pub enum Page {
     Cps,
     Zoom,
     Lighting,
+    JumpReset,
 }
 
 impl Page {
@@ -150,7 +151,7 @@ impl Typing {
 /// screen, where the outline is, stays clear.
 const SETTINGS_W: f32 = 264.0;
 /// Card height, the same for the settings and the colour tools so nothing moves when switching.
-const CARD_H: f32 = 320.0;
+const CARD_H: f32 = 332.0;
 /// Height of every button and small control row; tall enough to hit comfortably.
 const BUTTON_H: f32 = 18.0;
 /// Vertical distance between two rows of buttons.
@@ -245,9 +246,25 @@ const CPS_RESET: usize = CPS_BIGGER + 1;
 const CPS_ZEROS: usize = CPS_RESET + 1;
 /// The start page's Lighting button. Its page holds Fullbright and its key (earlier controls).
 const OPEN_LIGHT: usize = CPS_ZEROS + 1;
+/// The start page's on/off switches, one beside each page button (Block, Mob, Counter, CPS,
+/// Zoom, Lighting).
+const HOME_BLOCK_ON: usize = OPEN_LIGHT + 1;
+const HOME_MOB_ON: usize = HOME_BLOCK_ON + 1;
+const HOME_COUNTER_ON: usize = HOME_MOB_ON + 1;
+const HOME_CPS_ON: usize = HOME_COUNTER_ON + 1;
+const HOME_ZOOM_ON: usize = HOME_CPS_ON + 1;
+const HOME_LIGHT_ON: usize = HOME_ZOOM_ON + 1;
+/// The start page's Jump reset button, that page's switch and perfect-window value (with its
+/// - and + buttons), and the button's own switch on the start page.
+const OPEN_JUMP: usize = HOME_LIGHT_ON + 1;
+const JUMP_ON: usize = OPEN_JUMP + 1;
+const JUMP_WINDOW: usize = JUMP_ON + 1;
+const JUMP_WINDOW_LESS: usize = JUMP_WINDOW + 1;
+const JUMP_WINDOW_MORE: usize = JUMP_WINDOW_LESS + 1;
+const HOME_JUMP_ON: usize = JUMP_WINDOW_MORE + 1;
 /// The last control index.
 #[cfg(test)]
-const LAST_CONTROL: usize = OPEN_LIGHT;
+const LAST_CONTROL: usize = HOME_JUMP_ON;
 /// Width of the small - and + buttons.
 const STEP_W: f32 = 26.0;
 /// The highlight fix's Off / On button, beside its - and + buttons.
@@ -263,9 +280,10 @@ const HOME_COUNTER_Y: f32 = 94.0;
 const HOME_CPS_Y: f32 = 124.0;
 const HOME_ZOOM_Y: f32 = 154.0;
 const HOME_LIGHT_Y: f32 = 184.0;
+const HOME_JUMP_Y: f32 = 214.0;
 const HOME_BUTTON_H: f32 = 28.0;
 /// Below the page buttons: a Menu section.
-const HOME_MENU_CAPTION_Y: f32 = HOME_LIGHT_Y + HOME_BUTTON_H + 12.0;
+const HOME_MENU_CAPTION_Y: f32 = HOME_JUMP_Y + HOME_BUTTON_H + 12.0;
 const HOME_KEY_Y: f32 = HOME_MENU_CAPTION_Y + 14.0;
 /// The mob page has no Fill row, so its options sit one row higher.
 const MOB_OPTIONS_SHIFT: f32 = ROW_STEP;
@@ -291,6 +309,17 @@ const CPS_RESET_Y: f32 = CPS_SIZE_Y + ROW_PITCH;
 /// The Lighting page's rows.
 const LIGHT_ON_Y: f32 = 34.0;
 const LIGHT_KEY_Y: f32 = LIGHT_ON_Y + ROW_PITCH;
+/// The Jump reset page's rows: the switch, then the timing section with its value, and a note.
+const JUMP_ON_Y: f32 = 34.0;
+const JUMP_CAPTION_Y: f32 = JUMP_ON_Y + ROW_PITCH + SECTION_GAP;
+const JUMP_WINDOW_Y: f32 = JUMP_CAPTION_Y + 14.0;
+const JUMP_NOTE_Y: f32 = JUMP_WINDOW_Y + ROW_PITCH + 6.0;
+/// What the page says under its value; each line has to fit the card's width.
+const JUMP_NOTE: [&str; 3] = [
+    "Jump the moment you get hit.",
+    "Shows early or late by the crosshair",
+    "and whether you took knockback.",
+];
 /// The Zoom page's rows.
 const ZOOM_ON_Y: f32 = 34.0;
 const ZOOM_KEY_Y: f32 = ZOOM_ON_Y + ROW_PITCH;
@@ -324,6 +353,7 @@ pub(super) fn card_height(state: MenuState) -> f32 {
         Page::Cps => CPS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Zoom => ZOOM_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Lighting => LIGHT_KEY_Y + BUTTON_H + CARD_FOOT,
+        Page::JumpReset => JUMP_NOTE_Y + 12.0 * JUMP_NOTE.len() as f32 + CARD_FOOT,
         Page::Block => HIGHLIGHT_Y + BUTTON_H + CARD_FOOT,
         Page::Mob => BOTTOM_Y - MOB_OPTIONS_SHIFT + BUTTON_H + CARD_FOOT,
     }
@@ -387,14 +417,21 @@ const SLIDER_KNOB: f32 = 12.0;
 const SLIDER_TRACK: [f32; 4] = [0.22, 0.23, 0.28, 1.0];
 /// The switches: the pill's colour while off (on is `ACTIVE`), and the header accent.
 const SWITCH_OFF: [f32; 4] = [0.43, 0.44, 0.52, 1.0];
-/// What each start page button says under its name (Block, Mob, Counter, Zoom, CPS, Lighting).
-const HOME_ABOUT: [&str; 6] = [
-    "The block you are looking at",
+/// The start page's switches sit right of the page buttons: this wide, after a small gap.
+const HOME_SWITCH_W: f32 = 40.0;
+const HOME_GAP: f32 = 4.0;
+/// The width of a start page button.
+const HOME_BUTTON_W: f32 = SETTINGS_W - 20.0 - HOME_SWITCH_W - HOME_GAP;
+/// What each start page button says under its name (Block, Mob, Counter, Zoom, CPS, Lighting,
+/// Jump reset).
+const HOME_ABOUT: [&str; 7] = [
+    "The block you look at",
     "Mobs and players you look at",
-    "Arrows left, shown on your HUD",
-    "Hold a key, scroll to zoom in",
-    "Left and right clicks per second",
-    "Fullbright for caves and nights",
+    "Arrows left, on your HUD",
+    "Hold a key to zoom in",
+    "Left/right clicks per second",
+    "Fullbright for caves, nights",
+    "Times your jump after a hit",
 ];
 /// Settings sit in lighter inset panels, `SECTION_PAD` wider than their rows; the gap between two
 /// panels is `SECTION_GAP` more than the rows' own spacing.
@@ -413,7 +450,13 @@ const BADGE: f32 = 22.0;
 const TITLE_X: f32 = 8.0;
 const ACCENT: [f32; 4] = [0.66, 0.5, 0.97, 1.0];
 /// The switch rows: bound by `#<name>_bg` (pill colour) and `#<name>_knob` (knob position).
-const SWITCHES: [&str; 14] = [
+const SWITCHES: [&str; 22] = [
+    "home_block",
+    "home_mob",
+    "home_counter",
+    "home_cps",
+    "home_zoom",
+    "home_light",
     "rainbow",
     "pulse",
     "fill_match",
@@ -428,6 +471,8 @@ const SWITCHES: [&str; 14] = [
     "cps_on",
     "cps_right",
     "cps_zeros",
+    "home_jump",
+    "jump_on",
 ];
 /// The card's outline and the keyboard focus ring.
 const BORDER: [f32; 4] = [0.3, 0.31, 0.37, 1.0];
@@ -601,6 +646,37 @@ fn content_in(settings: &Settings, seconds: f32, state: MenuState) -> String {
         settings.cps.zeros
     );
     controls.push_str(r#",{"kind":"button","id":"open_light","label":"Lighting"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"home_block","label":"Block outline on","value":{}}},{{"kind":"toggle","id":"home_mob","label":"Mob hitbox on","value":{}}},{{"kind":"toggle","id":"home_counter","label":"Arrow counter on","value":{}}},{{"kind":"toggle","id":"home_cps","label":"CPS counter on","value":{}}},{{"kind":"toggle","id":"home_zoom","label":"Zoom on","value":{}}},{{"kind":"toggle","id":"home_light","label":"Fullbright on","value":{}}}"#,
+        settings.block_on,
+        settings.mob_on,
+        settings.counter.on,
+        settings.cps.on,
+        settings.zoom.on,
+        settings.fullbright
+    );
+    controls.push_str(r#",{"kind":"button","id":"open_jump","label":"Jump reset"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"jump_on","label":"Jump reset","value":{}}}"#,
+        settings.jump_reset.on
+    );
+    for (id, label) in [
+        ("jump_window", "Perfect window"),
+        ("jump_window_less", "Narrower window"),
+        ("jump_window_more", "Wider window"),
+    ] {
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#
+        );
+    }
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"home_jump","label":"Jump reset on","value":{}}}"#,
+        settings.jump_reset.on
+    );
     format!(
         r#"{{"reference_size":[{},{}],"motion":true,"widget_colors":{{"background":[0.07,0.08,0.1,0.98],"surface":[0.2,0.21,0.24,1],"text":[0.92,0.93,0.95,1],"accent":[0.45,0.24,0.75,1],"border":[0.36,0.37,0.42,1]}},"controls":[{controls}],"surface":{{"screen":"block_outline.screen","document":{},"bindings":{}}}}}"#,
         // Shrinks the whole menu on windows too small for the card, with a small margin.
@@ -639,7 +715,7 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     );
     // The arrow counter lives on the HUD, which the menu hides on its other pages.
     out.push_str(
-        if matches!(state.page, Page::Counter | Page::Cps) || state.moving {
+        if matches!(state.page, Page::Counter | Page::Cps | Page::JumpReset) || state.moving {
             r#""show_gameplay_hud":true,"#
         } else {
             r#""show_gameplay_hud":false,"#
@@ -685,6 +761,14 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     value(&mut out, CPS_ON, &boolean(settings.cps.on));
     value(&mut out, CPS_RIGHT, &boolean(settings.cps.right));
     value(&mut out, CPS_ZEROS, &boolean(settings.cps.zeros));
+    value(&mut out, HOME_BLOCK_ON, &boolean(settings.block_on));
+    value(&mut out, HOME_MOB_ON, &boolean(settings.mob_on));
+    value(&mut out, HOME_COUNTER_ON, &boolean(settings.counter.on));
+    value(&mut out, HOME_CPS_ON, &boolean(settings.cps.on));
+    value(&mut out, HOME_ZOOM_ON, &boolean(settings.zoom.on));
+    value(&mut out, HOME_LIGHT_ON, &boolean(settings.fullbright));
+    value(&mut out, JUMP_ON, &boolean(settings.jump_reset.on));
+    value(&mut out, HOME_JUMP_ON, &boolean(settings.jump_reset.on));
     out.push_str(r#"],"binding_changes":"#);
     bindings_into(&mut out, settings, seconds, state);
     out.push('}');

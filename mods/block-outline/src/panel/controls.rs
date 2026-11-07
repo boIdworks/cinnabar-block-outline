@@ -36,6 +36,8 @@ pub(super) enum View {
     Zoom,
     /// The Lighting page.
     Lighting,
+    /// The Jump reset page.
+    JumpReset,
 }
 
 /// What a control is, which is also what the keyboard does to it.
@@ -94,6 +96,7 @@ fn build() -> Vec<Control> {
     let press = |id: &str| Action::Press(id.to_owned());
     let full = SETTINGS_W - 20.0;
     let right = 10.0 + HALF + 4.0;
+    let home_switch_x = 10.0 + HOME_BUTTON_W + HOME_GAP;
     let row = |y: f32| [10.0, y, full, BUTTON_H];
     let half = |y: f32| [10.0, y, HALF, BUTTON_H];
     let half_right = |y: f32| [right, y, HALF, BUTTON_H];
@@ -113,39 +116,87 @@ fn build() -> Vec<Control> {
     // The start page.
     add(
         View::Home,
-        [10.0, HOME_BLOCK_Y, full, HOME_BUTTON_H],
+        [10.0, HOME_BLOCK_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Colours and size of the block outline",
         press("open_block"),
     );
     add(
         View::Home,
-        [10.0, HOME_MOB_Y, full, HOME_BUTTON_H],
+        [home_switch_x, HOME_BLOCK_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide the block outline",
+        Action::Toggle("home_block"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_MOB_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Colours and size of mob hitboxes",
         press("open_mob"),
     );
     add(
         View::Home,
-        [10.0, HOME_COUNTER_Y, full, HOME_BUTTON_H],
+        [home_switch_x, HOME_MOB_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide mob hitboxes",
+        Action::Toggle("home_mob"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_COUNTER_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Shows how many arrows you carry",
         press("open_counter"),
     );
     add(
         View::Home,
-        [10.0, HOME_CPS_Y, full, HOME_BUTTON_H],
+        [home_switch_x, HOME_COUNTER_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide the arrow counter",
+        Action::Toggle("home_counter"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_CPS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Left and right clicks per second",
         press("open_cps"),
     );
     add(
         View::Home,
-        [10.0, HOME_ZOOM_Y, full, HOME_BUTTON_H],
+        [home_switch_x, HOME_CPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide the CPS counter",
+        Action::Toggle("home_cps"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_ZOOM_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Hold a key to zoom in smoothly",
         press("open_zoom"),
     );
     add(
         View::Home,
-        [10.0, HOME_LIGHT_Y, full, HOME_BUTTON_H],
+        [home_switch_x, HOME_ZOOM_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Turn zoom on or off",
+        Action::Toggle("home_zoom"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_LIGHT_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Fullbright and its key",
         press("open_light"),
+    );
+    add(
+        View::Home,
+        [home_switch_x, HOME_LIGHT_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Turn fullbright on or off",
+        Action::Toggle("home_light"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_JUMP_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Tells you if you jump early or late",
+        press("open_jump"),
+    );
+    add(
+        View::Home,
+        [home_switch_x, HOME_JUMP_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Turn the jump reset timing on or off",
+        Action::Toggle("home_jump"),
     );
     add(
         View::Home,
@@ -464,6 +515,36 @@ fn build() -> Vec<Control> {
         Action::Key("fullbright_key"),
     );
 
+    // The Jump reset page.
+    add(
+        View::JumpReset,
+        row(JUMP_ON_Y),
+        "Shows early or late when you jump",
+        Action::Toggle("jump_on"),
+    );
+    add(
+        View::JumpReset,
+        value_area(JUMP_WINDOW_Y),
+        "Jumps this close to the hit are perfect",
+        Action::Help,
+    );
+    add(
+        View::JumpReset,
+        pair_area(JUMP_WINDOW_Y),
+        "5 ms narrower or wider",
+        Action::Help,
+    );
+    add(
+        View::JumpReset,
+        row(JUMP_WINDOW_Y),
+        STEPPER_TIP,
+        Action::Stepper {
+            value: "jump_window",
+            less: "jump_window_less",
+            more: "jump_window_more",
+        },
+    );
+
     // The Zoom page.
     add(
         View::Zoom,
@@ -571,6 +652,7 @@ fn shown(view: View, state: MenuState, fill_matches: bool) -> bool {
         View::Cps => state.page == Page::Cps,
         View::Zoom => state.page == Page::Zoom,
         View::Lighting => state.page == Page::Lighting,
+        View::JumpReset => state.page == Page::JumpReset,
         View::Colour => outline && colour_open,
         View::FillOwn => state.page == Page::Block && !fill_matches,
         View::FillMatch => state.page == Page::Block && fill_matches,
@@ -655,7 +737,13 @@ fn toggle_on(settings: &Settings, state: MenuState, id: &str) -> bool {
         "pulse" => shown.pulse,
         "fill_match" => shown.fill_rgb.is_none(),
         "show_all_mobs" => shown.show_all_mobs,
-        "fullbright" => shown.fullbright,
+        "fullbright" | "home_light" => shown.fullbright,
+        "home_block" => shown.block_on,
+        "home_mob" => shown.mob_on,
+        "home_counter" => shown.counter.on,
+        "home_cps" => shown.cps.on,
+        "home_zoom" => shown.zoom.on,
+        "jump_on" | "home_jump" => shown.jump_reset.on,
         "counter" => shown.counter.on,
         "counter_bow" => shown.counter.bow_only,
         "cps_on" => shown.cps.on,

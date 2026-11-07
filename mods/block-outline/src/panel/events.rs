@@ -33,7 +33,8 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
 
 fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     match id {
-        "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_zoom" | "open_light" => {
+        "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_zoom" | "open_light"
+        | "open_jump" => {
             if state.page != Page::Home {
                 return false;
             }
@@ -43,11 +44,30 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
                 "open_zoom" => Page::Zoom,
                 "open_cps" => Page::Cps,
                 "open_light" => Page::Lighting,
+                "open_jump" => Page::JumpReset,
                 _ => Page::Counter,
             };
             state.colour_open = false;
             state.editing_fill = false;
             state.editing_aim = false;
+            return true;
+        }
+        // The start page's switches: each turns a mod on or off from the list.
+        "home_block" | "home_mob" | "home_counter" | "home_cps" | "home_zoom" | "home_light"
+        | "home_jump" => {
+            if state.page != Page::Home {
+                return false;
+            }
+            let on = value > 0.5;
+            match id {
+                "home_block" => settings.block_on = on,
+                "home_mob" => settings.mob_on = on,
+                "home_counter" => settings.counter.on = on,
+                "home_cps" => settings.cps.on = on,
+                "home_zoom" => settings.zoom.on = on,
+                "home_jump" => settings.jump_reset.on = on,
+                _ => settings.fullbright = on,
+            }
             return true;
         }
         "back" => {
@@ -70,6 +90,7 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
         _ if id.starts_with("counter") => return apply_counter(settings, state, id, value),
         _ if id.starts_with("cps") => return apply_cps(settings, state, id, value),
         _ if id.starts_with("zoom") => return apply_zoom(settings, id, value),
+        _ if id.starts_with("jump") => return apply_jump(settings, id, value),
         _ => {}
     }
     if state.page == Page::Mob {
@@ -121,6 +142,7 @@ fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
     match id {
         "cps_on" => cps.on = value > 0.5,
         "cps_right" => cps.right = value > 0.5,
+        "cps_zeros" => cps.zeros = value > 0.5,
         "cps_move" => {
             // Something to drag: moving shows the readout even while it is off.
             cps.on = true;
@@ -137,6 +159,21 @@ fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         _ => return false,
     }
     (*settings, *state) != before
+}
+
+/// [`apply`] for the Jump reset page: the switch, and the perfect window that steps or resets.
+fn apply_jump(settings: &mut Settings, id: &str, value: f32) -> bool {
+    use crate::jumpreset::{DEFAULT_WINDOW, JumpReset};
+    let before = *settings;
+    let jump = &mut settings.jump_reset;
+    match id {
+        "jump_on" => jump.on = value > 0.5,
+        "jump_window" => jump.window = DEFAULT_WINDOW,
+        "jump_window_less" => jump.window = JumpReset::stepped(jump.window, -1),
+        "jump_window_more" => jump.window = JumpReset::stepped(jump.window, 1),
+        _ => return false,
+    }
+    *settings != before
 }
 
 /// [`apply`] for the Zoom page: switches, and values that step by one notch or reset.

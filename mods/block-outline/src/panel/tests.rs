@@ -434,7 +434,11 @@ fn menu_key_capture_and_hover_help() {
         tip_update(None, [0.0; 2], on(false), false),
         r##"{"binding_changes":{"#tip_visible":false}}"##
     );
-    let shown = tip_update(Some(13), [SETTINGS_W - 2.0, 40.0], on(false), false);
+    // The line colour button of the Block page, wherever the table keeps it.
+    let line = controls()
+        .iter()
+        .position(|control| control.tip == "Shows or hides the line colour tools");
+    let shown = tip_update(line, [SETTINGS_W - 2.0, 40.0], on(false), false);
     assert!(
         shown.contains(&format!("[{},", SETTINGS_W - TIP_WIDTH - 4.0)),
         "{shown}"
@@ -650,7 +654,7 @@ fn fixed_formats_like_json_numbers() {
         assert_eq!(out, text, "{value}");
     }
     let update = update(&Settings::default(), 0.0, MenuState::default());
-    assert!(update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}],"capture_key":false,"show_gameplay_hud":false,"control_values":[[0,255],[1,255],[2,255],[3,100],[4,3],[5,0],[6,false],[17,0.5],[18,0.5],[19,"#FFFFFF"],[21,false],[25,true],[42,true],[46,false],[50,true],[51,false],[59,true],[60,false],[61,true],[62,true],[75,true],[76,true],[82,true]],"binding_changes":{"##), "{update}");
+    assert!(update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}],"capture_key":false,"show_gameplay_hud":false,"control_values":[[0,255],[1,255],[2,255],[3,100],[4,3],[5,0],[6,false],[17,0.5],[18,0.5],[19,"#FFFFFF"],[21,false],[25,true],[42,true],[46,false],[50,true],[51,false],[59,true],[60,false],[61,true],[62,true],[75,true],[76,true],[82,true],[84,true],[85,true],[86,true],[87,true],[88,true],[89,false],[91,true],[95,true]],"binding_changes":{"##), "{update}");
     assert!(update.ends_with("}}"));
 }
 
@@ -807,14 +811,108 @@ fn counter_settings_round_trip() {
 }
 
 /// The host refuses a menu document over 192 KiB, which would stop the whole mod loading. Keep
-/// some room: the colour wheel is most of it, so a new page costs about 1 KiB a control.
+/// some room: the colour wheel is most of it, so a new page costs about 1 KiB a control. (The
+/// Jump reset page and its start page button took this from 172 to 178 KiB: the limit is 192.)
 #[test]
 fn menu_document_stays_within_the_host_limit() {
     let size = document().len();
     assert!(
-        size <= 172 * 1024,
+        size <= 178 * 1024,
         "the menu document is {size} bytes; the host's limit is {} and some room is kept",
         192 * 1024
+    );
+}
+
+#[test]
+fn the_jump_reset_page_has_a_switch_and_a_window_that_steps() {
+    let mut s = Settings::default();
+    let mut m = MenuState::default();
+    assert!(press(&mut s, &mut m, "open_jump", 1.0));
+    assert_eq!(m.page, Page::JumpReset);
+    let shown = update(&s, 0.0, m);
+    assert!(
+        shown.contains(r##""#title_text":"Jump reset""##)
+            && shown.contains(r##""#jump_page_visible":true"##)
+            && shown.contains(r##""#cps_page_visible":false"##),
+        "{shown}"
+    );
+    // The HUD stays visible behind the page, so the sample readout can be seen.
+    assert!(shown.contains(r##""show_gameplay_hud":true"##));
+    assert!(switch_on(&shown, "jump_on"));
+    assert!(shown.contains(r##""#jump_window_text":"Perfect window: 75 ms""##));
+    assert!(shown.contains(r##""#jump_window_reset":"""##));
+    // The window steps by 5 ms, stays in bounds, and its own button resets it.
+    assert!(press(&mut s, &mut m, "jump_window_more", 1.0));
+    assert_eq!(s.jump_reset.window, 80);
+    let shown = update(&s, 0.0, m);
+    assert!(shown.contains(r##""#jump_window_text":"Perfect window: 80 ms""##));
+    assert!(shown.contains(r##""#jump_window_reset":"reset""##));
+    for _ in 0..60 {
+        press(&mut s, &mut m, "jump_window_more", 1.0);
+    }
+    assert_eq!(s.jump_reset.window, crate::jumpreset::MAX_WINDOW);
+    assert!(
+        !press(&mut s, &mut m, "jump_window_more", 1.0),
+        "at the top"
+    );
+    for _ in 0..60 {
+        press(&mut s, &mut m, "jump_window_less", 1.0);
+    }
+    assert_eq!(s.jump_reset.window, crate::jumpreset::MIN_WINDOW);
+    assert!(press(&mut s, &mut m, "jump_window", 1.0));
+    assert_eq!(s.jump_reset.window, crate::jumpreset::DEFAULT_WINDOW);
+    // The switch, here and on the start page, is one setting.
+    assert!(press(&mut s, &mut m, "jump_on", 0.0));
+    assert!(!s.jump_reset.on);
+    assert!(!switch_on(&update(&s, 0.0, m), "jump_on"));
+    assert!(
+        !press(&mut s, &mut m, "home_jump", 1.0),
+        "only on the start page"
+    );
+    assert!(press(&mut s, &mut m, "back", 1.0));
+    assert!(press(&mut s, &mut m, "home_jump", 1.0));
+    assert!(s.jump_reset.on);
+    assert!(switch_on(&update(&s, 0.0, m), "home_jump"));
+    // Resetting an outline page keeps it.
+    s.jump_reset.window = 120;
+    s.reset();
+    assert_eq!(s.jump_reset.window, 120);
+}
+
+#[test]
+fn the_keyboard_reaches_every_control_of_the_jump_reset_page() {
+    let s = Settings::default();
+    let mut m = MenuState {
+        page: Page::JumpReset,
+        ..MenuState::default()
+    };
+    focus_on(&s, &mut m, &Action::Toggle("jump_on"));
+    assert_eq!(focused(&m), "Shows early or late when you jump");
+    focus_on(
+        &s,
+        &mut m,
+        &Action::Stepper {
+            value: "jump_window",
+            less: "jump_window_less",
+            more: "jump_window_more",
+        },
+    );
+    // Right presses the + button, Enter the value (its reset).
+    assert_eq!(
+        keyed(&s, &mut m, &["ArrowRight"]).events,
+        vec![("jump_window_more".to_owned(), 1.0)]
+    );
+    assert_eq!(enter(&s, &mut m), vec![("jump_window".to_owned(), 1.0)]);
+    // Its help shows where the pointer is.
+    let state = m;
+    let tip = |point| tip_at(point, state, false).map(|index| controls()[index].tip);
+    assert_eq!(
+        tip([15.0, JUMP_WINDOW_Y + 5.0]),
+        Some("Jumps this close to the hit are perfect")
+    );
+    assert_eq!(
+        tip([SETTINGS_W - 15.0, JUMP_WINDOW_Y + 5.0]),
+        Some("5 ms narrower or wider")
     );
 }
 
@@ -986,6 +1084,27 @@ fn dump_snapshots() {
         ("block", on(false)),
         ("colour", on(true)),
         ("zoom", zoom),
+        (
+            "cps",
+            MenuState {
+                page: Page::Cps,
+                ..MenuState::default()
+            },
+        ),
+        (
+            "lighting",
+            MenuState {
+                page: Page::Lighting,
+                ..MenuState::default()
+            },
+        ),
+        (
+            "jump",
+            MenuState {
+                page: Page::JumpReset,
+                ..MenuState::default()
+            },
+        ),
         ("asking", asking),
         ("capture", capture),
         ("home_capture", home_capture),
@@ -1319,7 +1438,7 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
     assert_eq!(enter(&s, &mut m), vec![("open_block".to_owned(), 1.0)]);
     // Down visits the page buttons, then the menu key; Up goes back.
     let mut seen = Vec::new();
-    for _ in 0..7 {
+    for _ in 0..8 {
         keyed(&s, &mut m, &["ArrowDown"]);
         seen.push(enter(&s, &mut m).remove(0).0);
     }
@@ -1331,19 +1450,28 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
             "open_cps",
             "open_zoom",
             "open_light",
+            "open_jump",
             "menu_key",
             "close"
         ]
     );
-    // Past the last stop it wraps to the first, and Up from the first goes to the last.
+    // Down from the close button reaches the switch right below it, and Up comes back.
     keyed(&s, &mut m, &["ArrowDown"]);
-    assert_eq!(enter(&s, &mut m)[0].0, "open_block");
+    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 0.0)]);
     keyed(&s, &mut m, &["ArrowUp"]);
     assert_eq!(enter(&s, &mut m)[0].0, "close");
+    // Right from a page button reaches its switch, which Enter flips, and Left goes back.
+    keyed(&s, &mut m, &["Tab"]);
+    assert_eq!(enter(&s, &mut m)[0].0, "open_block");
+    keyed(&s, &mut m, &["ArrowRight"]);
+    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 0.0)]);
+    keyed(&s, &mut m, &["ArrowLeft"]);
+    assert_eq!(enter(&s, &mut m)[0].0, "open_block");
     // Shift-less Tab also goes forward, and the focus ring and bottom line follow it.
     let patch = focus_update(m, false);
     assert!(
-        patch.contains(r##""#focus_visible":true"##) && patch.contains("Closes the menu"),
+        patch.contains(r##""#focus_visible":true"##)
+            && patch.contains("Colours and size of the block"),
         "{patch}"
     );
 }
@@ -1831,4 +1959,86 @@ fn changed_values_offer_a_reset() {
         changed.contains(r##""#zoom_time_reset":"","##),
         "the others are still at their defaults"
     );
+}
+
+/// Every switch on the pages must do something: a switch with a control but no handler looks
+/// fine and silently ignores clicks.
+#[test]
+fn every_switch_changes_a_setting() {
+    for name in SWITCHES {
+        let page = match name {
+            n if n.starts_with("home_") => Page::Home,
+            "rainbow" | "pulse" | "fill_match" => Page::Block,
+            "show_all_mobs" => Page::Mob,
+            "fullbright" => Page::Lighting,
+            n if n.starts_with("counter") => Page::Counter,
+            n if n.starts_with("zoom") => Page::Zoom,
+            n if n.starts_with("jump") => Page::JumpReset,
+            _ => Page::Cps,
+        };
+        let changed = [1.0, 0.0].into_iter().any(|value| {
+            let mut settings = Settings::default();
+            let mut state = on(false);
+            state.page = page;
+            let before = settings;
+            press(&mut settings, &mut state, name, value);
+            settings != before
+        });
+        assert!(changed, "the {name} switch changes nothing");
+    }
+}
+
+/// The start page's switches turn each mod on and off, and a mod that is off draws nothing.
+#[test]
+fn the_start_page_switches_turn_mods_on_and_off() {
+    let mut s = Settings::default();
+    let mut m = MenuState::default();
+    for id in [
+        "home_block",
+        "home_mob",
+        "home_counter",
+        "home_cps",
+        "home_zoom",
+        "home_light",
+        "home_jump",
+    ] {
+        assert!(press(&mut s, &mut m, id, 0.0) || id == "home_light", "{id}");
+    }
+    assert!(!s.block_on && !s.mob_on && !s.counter.on && !s.cps.on && !s.zoom.on);
+    assert!(!s.jump_reset.on);
+    assert!(!s.fullbright);
+    assert!(press(&mut s, &mut m, "home_light", 1.0));
+    assert!(s.fullbright);
+    for id in [
+        "home_block",
+        "home_mob",
+        "home_counter",
+        "home_cps",
+        "home_zoom",
+        "home_jump",
+    ] {
+        assert!(press(&mut s, &mut m, id, 1.0), "{id}");
+    }
+    assert!(s.block_on && s.mob_on && s.counter.on && s.cps.on && s.zoom.on && s.jump_reset.on);
+    // Their switches show it, and the page's own switches agree.
+    let update = update(&s, 0.0, m);
+    for id in [
+        "home_block",
+        "home_mob",
+        "home_counter",
+        "home_cps",
+        "home_zoom",
+        "home_jump",
+    ] {
+        assert!(switch_on(&update, id), "{id}");
+    }
+    assert!(switch_on(&update, "home_light"));
+    // Only on the start page.
+    m.page = Page::Zoom;
+    assert!(!press(&mut s, &mut m, "home_block", 0.0));
+    assert!(s.block_on);
+    // A reset keeps them as they are.
+    s.block_on = false;
+    s.reset();
+    assert!(!s.block_on);
 }

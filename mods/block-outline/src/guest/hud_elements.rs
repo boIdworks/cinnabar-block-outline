@@ -12,6 +12,13 @@ const SURFACE_RESERVE: u64 = 100_000;
 /// Fuel a frame needs left to read the inventory after it changed; with less, a later frame does.
 const INVENTORY_RESERVE: u64 = 90_000;
 
+/// Fuel a frame needs left to read the combat feed; with less, a later frame does.
+const COMBAT_RESERVE: u64 = 40_000;
+
+/// Fuel a frame needs left to save the settings (a new jump reset log row); with less, a later
+/// frame does.
+const LOG_SAVE_RESERVE: u64 = 120_000;
+
 /// Width of `arrows` written out, at text scale 1, measured once per new number.
 fn count_width(arrows: u32) -> f32 {
     if let Some((known, width)) = COUNT_WIDTH.with(StdCell::get)
@@ -70,7 +77,7 @@ fn drag_elements(
     (settings.counter.pos, settings.counter.scale) = (items[0].pos, items[0].scale);
     (settings.cps.pos, settings.cps.scale) = (items[1].pos, items[1].scale);
     if (settings.counter, settings.cps) != before {
-        SETTINGS.with(|s| s.set(*settings));
+        set_settings(*settings);
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
     }
     state.moving_cps = editor.selected == 1;
@@ -113,6 +120,7 @@ pub(super) fn arrow_counter(
             COUNTER_SHOWN.with(|shown| shown.set(None));
             CPS_WIDTHS.with(|w| w.set(None));
             CPS_SHOWN.with(|shown| shown.set(None));
+            JUMP_SHOWN.with(|shown| shown.set(None));
         }
         if reaction.republish {
             HUD_PUBLISHED.with(|published| published.set(false));
@@ -129,9 +137,10 @@ pub(super) fn arrow_counter(
         }
         COUNTER_SHOWN.with(|shown| shown.set(None));
         CPS_SHOWN.with(|shown| shown.set(None));
+        JUMP_SHOWN.with(|shown| shown.set(None));
         if let Err(error) = hud::set_surface(&counter::surface()) {
             HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
-            if SETTINGS.with(StdCell::get).counter.on {
+            if settings_with(|s| s.counter.on) {
                 report_once(&format!(
                     "Boldy Mods: allow the HUD permission for the arrow counter ({error})"
                 ));
@@ -144,12 +153,12 @@ pub(super) fn arrow_counter(
     let panel_open = controls.is_some_and(|c| c.panel_open);
     let moving = state.moving && panel_open;
     let viewport = hud_size.map(|v| [v[0], v[1]]);
-    let mut settings = SETTINGS.with(StdCell::get);
+    let mut settings = settings();
     if let Some(viewport) = viewport.filter(|_| settings.counter.pos.is_fraction()) {
         // An older settings file kept the position as a share of the screen: pin it to the
         // nearest edge or the middle now, where it is on screen, and save that.
         settings.counter.pos = counter::Pos::anchored(settings.counter.pos.at(viewport), viewport);
-        SETTINGS.with(|s| s.set(settings));
+        set_settings(settings);
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
     }
     if settings.counter.on {
@@ -236,23 +245,20 @@ pub(super) fn cps_frame(
     seconds: f32,
     hud_size: Option<[f32; 3]>,
 ) {
-    let settings = SETTINGS.with(StdCell::get).cps;
+    let settings = settings_with(|s| s.cps);
     if settings.on
         && let Some(controls) = controls.filter(|c| c.focused && c.gameplay && !c.panel_open)
     {
-        let (mut left, mut right) = CLICKS.with(StdCell::get);
-        let mut clicked = false;
-        for key in &controls.keys_pressed {
-            match key.as_str() {
-                "MouseLeft" => left.click(seconds),
-                "MouseRight" => right.click(seconds),
-                _ => continue,
+        CLICKS.with(|clicks| {
+            let (left, right) = &mut *clicks.borrow_mut();
+            for key in &controls.keys_pressed {
+                match key.as_str() {
+                    "MouseLeft" => left.click(seconds),
+                    "MouseRight" => right.click(seconds),
+                    _ => {}
+                }
             }
-            clicked = true;
-        }
-        if clicked {
-            CLICKS.with(|clicks| clicks.set((left, right)));
-        }
+        });
     }
     // The layer is published by the arrow counter; patch it only once it is up.
     if !HUD_PUBLISHED.with(StdCell::get) {
@@ -261,9 +267,17 @@ pub(super) fn cps_frame(
     }
     let viewport = hud_size.map(|v| [v[0], v[1]]);
     let edit = EDIT_CPS.with(StdCell::get);
+    // The counts first, which are cheap: with them, the place, the settings and the frame as
+    // last time, and the readout on screen, there is nothing to work out or compare.
+    let counts = cps_counts(seconds, &settings);
+    let key = (counts, viewport, settings, edit);
+    if CPS_KEY.with(StdCell::get) == Some(key) && CPS_SHOWN.with(|shown| shown.get().is_some()) {
+        return;
+    }
+    CPS_KEY.with(|last| last.set(Some(key)));
     let view = match viewport.filter(|_| settings.on || edit.is_some()) {
         Some(viewport) => {
-            let (left, right, layout) = cps_reading(seconds, &settings);
+            let ((left, right), layout) = (counts, cps_widths().layout(counts.0, counts.1));
             let scale = cps::clamp_scale(settings.scale);
             cps::View {
                 visible: true,
@@ -294,18 +308,210 @@ pub(super) fn cps_frame(
     }
 }
 
+/// What the jump reset reads of its settings every frame.
+struct JumpLive {
+    on: bool,
+    window: u16,
+    knockback: f32,
+}
+
+/// Jump reset: notes your jumps and the hits you take, and shows how far apart they were. Hits
+/// come from the host's combat feed (the local player being hurt); jumps from the jump key's
+/// presses in gameplay. Only an unused jump or hit within `jumpreset::RELEVANT` of the other
+/// counts, so ordinary jumping says nothing.
+pub(super) fn jump_reset_frame(
+    controls: Option<&input::Controls>,
+    delta: f32,
+    seconds: f32,
+    session: u64,
+) {
+    // Only the three values this uses: the settings hold the hit log too, which is not worth
+    // copying every frame.
+    let live = settings_with(|s| JumpLive {
+        on: s.jump_reset.on,
+        window: s.jump_reset.window,
+        knockback: s.jump_reset.knockback,
+    });
+    let (mut tracker, mut feed, known_session) = JUMP_RESET.with(StdCell::get);
+    let mut watch = JUMP_WATCH.with(StdCell::get);
+    let (mut verdict, mut outcome) = JUMP_VERDICT.with(StdCell::get);
+    if !live.on || session != known_session {
+        // Off, or another world: start clean, so switching on never judges something old.
+        (tracker, feed, watch) = (
+            jumpreset::Tracker::new(),
+            jumpreset::Feed::new(),
+            jumpreset::Watch::new(),
+        );
+        (verdict, outcome) = (None, None);
+    }
+    if live.on {
+        tracker.step(delta);
+        if budget::remaining_fuel() >= COMBAT_RESERVE {
+            const LIMIT: usize = mod_api::MAX_COMBAT_READ_EVENTS;
+            if let Ok(events) = player_state::read_combat(feed.after, LIMIT as u32) {
+                let mut batch = [(0u64, false); LIMIT];
+                let count = events.len().min(LIMIT);
+                for (slot, event) in batch.iter_mut().zip(&events) {
+                    *slot = (
+                        event.sequence,
+                        event.local && event.kind == player_state::CombatKind::Hurt,
+                    );
+                }
+                for _ in 0..feed.take(&batch[..count], LIMIT) {
+                    // Fall damage is the same kind of event but no hit: landing stops you dead,
+                    // which would read as a perfect reset.
+                    if watch.falling() {
+                        continue;
+                    }
+                    // A new hit: what the last one showed is over, and the movement after this
+                    // one is watched for knockback.
+                    (verdict, outcome) = (None, None);
+                    watch.hit();
+                    if let Some(timing) = tracker.hit(live.window) {
+                        verdict = Some((timing, seconds));
+                    }
+                }
+            }
+        }
+        // Your velocity every frame, so the frame of a hit has one before it to compare with.
+        let motion = if budget::remaining_fuel() >= COMBAT_RESERVE {
+            player_state::read_motion().ok().flatten()
+        } else {
+            None
+        };
+        let velocity = motion
+            .as_ref()
+            .map(|motion| [motion.velocity.0, motion.velocity.1, motion.velocity.2]);
+        watch.record(velocity, motion.as_ref().map(|motion| motion.on_ground));
+        if let Some(found) = watch.sample(delta, velocity, live.knockback) {
+            // A reset needs a jump near the hit too; a wall or corner also kills a shove.
+            let found = found.judged(verdict.map(|(timing, _)| timing));
+            outcome = Some((found, seconds));
+            // Keep the numbers for tuning: written to the settings file below.
+            let timing = verdict.map(|(timing, _)| timing);
+            {
+                let offset = timing.map_or(String::from("x"), |t| {
+                    format!(
+                        "{}",
+                        if t.before {
+                            -i32::from(t.ms)
+                        } else {
+                            i32::from(t.ms)
+                        }
+                    )
+                });
+                let row = format!(
+                    "{}|{offset}|{}",
+                    (found.knockback * 1000.0).round(),
+                    watch.recording()
+                );
+                // A jump reset is also kept in a list of its own, so it is not pushed out by the
+                // ordinary hits after it.
+                if found.reset {
+                    JUMP_RESETS.with(|resets| {
+                        jumpreset::push_capped(
+                            &mut resets.borrow_mut(),
+                            row.clone(),
+                            jumpreset::RESETS_KEPT,
+                        );
+                    });
+                }
+                JUMP_TRACES.with(|traces| {
+                    jumpreset::push_capped(&mut traces.borrow_mut(), row, jumpreset::LOG_LEN);
+                });
+            }
+            let mut all = settings();
+            all.jump_reset
+                .log
+                .push(jumpreset::Row::new(timing, found, watch.trace()));
+            set_settings(all);
+            JUMP_LOG_UNSAVED.with(|unsaved| unsaved.set(true));
+        }
+        watch.ground(motion.as_ref().map(|motion| motion.on_ground));
+        // A hurt that never showed the shove (fire, poison, ...) was no hit: show nothing.
+        if watch.take_dropped() {
+            verdict = None;
+        }
+        // Presses count only in gameplay with the menu closed.
+        if let Some(controls) = controls.filter(|c| c.focused && c.gameplay && !c.panel_open) {
+            let pressed = JUMP_KEYS.with(|keys| {
+                let keys = keys.borrow();
+                controls.keys_pressed.iter().any(|key| {
+                    if keys.is_empty() {
+                        key == "Space"
+                    } else {
+                        keys.contains(key)
+                    }
+                })
+            });
+            if pressed && let Some(timing) = tracker.press(live.window) {
+                verdict = Some((timing, seconds));
+            }
+        }
+    }
+    JUMP_RESET.with(|state| state.set((tracker, feed, session)));
+    JUMP_WATCH.with(|stored| stored.set(watch));
+    JUMP_VERDICT.with(|stored| stored.set((verdict, outcome)));
+    if JUMP_LOG_UNSAVED.with(StdCell::get) && budget::remaining_fuel() >= LOG_SAVE_RESERVE {
+        JUMP_LOG_UNSAVED.with(|unsaved| unsaved.set(false));
+        save_settings(&settings());
+    }
+    // The layer is published by the arrow counter; patch it only once it is up.
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        JUMP_SHOWN.with(|shown| shown.set(None));
+        return;
+    }
+    // On its own page the readout shows a sample, so it can be seen without being hit.
+    let previewing = live.on
+        && controls.is_some_and(|c| c.panel_open)
+        && MENU.with(StdCell::get).page == panel::Page::JumpReset;
+    let view = if previewing {
+        jumpreset::SAMPLE
+    } else {
+        // Each part stays up for `SHOW` seconds after it was made.
+        let fresh = |at: f32| live.on && seconds - at <= jumpreset::SHOW;
+        jumpreset::View {
+            // The timing waits until the hit is known to be a hit: its shove has shown.
+            timing: verdict
+                .filter(|(_, at)| fresh(*at) && (outcome.is_some() || watch.shoved()))
+                .map(|(timing, _)| timing),
+            outcome: outcome.filter(|(_, at)| fresh(*at)).map(|(found, _)| found),
+        }
+    };
+    let shown = JUMP_SHOWN.with(StdCell::get);
+    // Hidden is hidden, whatever it would have shown.
+    if shown.is_some_and(|shown| shown == view || (shown.is_hidden() && view.is_hidden())) {
+        return;
+    }
+    match hud::update_surface(&jumpreset::patch(&view)) {
+        Ok(()) => JUMP_SHOWN.with(|s| s.set(Some(view))),
+        Err(error) => {
+            // The layer is gone (or was refused): the arrow counter publishes it again.
+            HUD_PUBLISHED.with(|published| published.set(false));
+            HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+            report_once(&format!("Boldy Mods: jump reset failed ({error})"));
+        }
+    }
+}
+
 /// The clicks of each button in the last second (the right one only when it is shown) and the
 /// readout's layout at text scale 1.
 fn cps_reading(seconds: f32, settings: &cps::Cps) -> (u32, Option<u32>, cps::Layout) {
-    let (mut left, mut right) = CLICKS.with(StdCell::get);
-    let left_now = left.per_second(seconds);
-    let right_now = settings.right.then(|| right.per_second(seconds));
-    CLICKS.with(|clicks| clicks.set((left, right)));
+    let (left_now, right_now) = cps_counts(seconds, settings);
     (
         left_now,
         right_now,
         cps_widths().layout(left_now, right_now),
     )
+}
+
+/// The clicks of each button in the last second (the right one only when it is shown).
+fn cps_counts(seconds: f32, settings: &cps::Cps) -> (u32, Option<u32>) {
+    CLICKS.with(|clicks| {
+        let (left, right) = &mut *clicks.borrow_mut();
+        let left_now = left.per_second(seconds);
+        (left_now, settings.right.then(|| right.per_second(seconds)))
+    })
 }
 
 /// The CPS text's pieces measured at text scale 1, once per GUI scale: `CPS:`, a digit, a
