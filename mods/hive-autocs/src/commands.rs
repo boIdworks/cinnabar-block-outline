@@ -41,7 +41,11 @@ pub fn with_autocs(packet: &[u8]) -> Option<Vec<u8>> {
     let header_value = header.var_u32()?;
     let body = header.rest();
     let mut commands = AvailableCommands::decode(&mut wire::Reader::new(body)).ok()?;
-    if commands.commands.iter().any(|command| command.name.to_string_lossy() == NAME) {
+    if commands
+        .commands
+        .iter()
+        .any(|command| command.name.to_string_lossy() == NAME)
+    {
         return None;
     }
     // Only rewrite a list the codec reproduces byte for byte, so nothing of Hive's is lost.
@@ -51,14 +55,21 @@ pub fn with_autocs(packet: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let maps = add_enum(&mut commands, "AutoCsMap", MAPS.iter().map(|map| slug(map)));
-    let actions = add_enum(&mut commands, "AutoCsAction", ACTIONS.iter().map(|action| action.to_string()));
+    let actions = add_enum(
+        &mut commands,
+        "AutoCsAction",
+        ACTIONS.iter().map(|action| action.to_string()),
+    );
     let parameter = |name: &str, index: u32| CommandParameter {
         name: name.into(),
         parse_symbol: wire::U32LE(ARG_VALID | ARG_ENUM | index),
         is_optional: false,
         options: wire::U8(0),
     };
-    let overload = |parameter_data| CommandOverload { is_chaining: false, parameter_data };
+    let overload = |parameter_data| CommandOverload {
+        is_chaining: false,
+        parameter_data,
+    };
     commands.commands.push(CommandData {
         name: NAME.into(),
         description: "Auto CS: make a BedWars Squads custom server".into(),
@@ -79,10 +90,18 @@ pub fn with_autocs(packet: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Adds an enum of `values`, reusing values already listed; returns its index.
-fn add_enum(commands: &mut AvailableCommands, name: &str, values: impl Iterator<Item = String>) -> u32 {
+fn add_enum(
+    commands: &mut AvailableCommands,
+    name: &str,
+    values: impl Iterator<Item = String>,
+) -> u32 {
     let indexes = values
         .map(|value| {
-            let index = match commands.enum_values.iter().position(|known| known.to_string_lossy() == value) {
+            let index = match commands
+                .enum_values
+                .iter()
+                .position(|known| known.to_string_lossy() == value)
+            {
                 Some(index) => index,
                 None => {
                     commands.enum_values.push(value.as_str().into());
@@ -92,6 +111,9 @@ fn add_enum(commands: &mut AvailableCommands, name: &str, values: impl Iterator<
             wire::U32LE(index as u32)
         })
         .collect();
-    commands.enum_data.push(CommandEnum { name: name.into(), values: indexes });
+    commands.enum_data.push(CommandEnum {
+        name: name.into(),
+        values: indexes,
+    });
     (commands.enum_data.len() - 1) as u32
 }

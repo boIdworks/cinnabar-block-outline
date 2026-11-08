@@ -1626,9 +1626,7 @@ fn sections() -> String {
             row_end(HOME_KEY_Y),
         )],
     ));
-    format!(
-        "{block},{mob},{counter},{cps},{fps},{zoom},{light},{jump},{crosshair},{colour},{home}"
-    )
+    format!("{block},{mob},{counter},{cps},{fps},{zoom},{light},{jump},{crosshair},{colour},{home}")
 }
 
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned

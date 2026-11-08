@@ -65,7 +65,11 @@ impl Recorder {
     fn packet(&mut self, way: Way, packet: &Packet<'_>) {
         let side = if way == Way::FromServer { "S>C" } else { "C>S" };
         if self.seen[way as usize].insert(packet.id) {
-            self.note(format!("{side} first packet id {} ({} bytes)", packet.id, packet.bytes.len()));
+            self.note(format!(
+                "{side} first packet id {} ({} bytes)",
+                packet.id,
+                packet.bytes.len()
+            ));
         }
         let id = packet.id;
         match (way, id) {
@@ -82,7 +86,9 @@ impl Recorder {
             }
             (_, packets::MODAL_FORM_REQUEST | packets::SERVER_SETTINGS_RESPONSE) => {
                 match packets::read_form_request(packet) {
-                    Some((form, json)) => self.note(format!("{side} form id={id} form={form} json={json}")),
+                    Some((form, json)) => {
+                        self.note(format!("{side} form id={id} form={form} json={json}"))
+                    }
                     None => self.raw(side, packet),
                 }
             }
@@ -97,9 +103,9 @@ impl Recorder {
                 None => self.raw(side, packet),
             },
             (_, packets::DDUI_SHOW_SCREEN) => match packets::read_show_screen(packet) {
-                Some((screen, form, data)) => {
-                    self.note(format!("{side} ddui-show screen={screen:?} form={form} data={data:?}"))
-                }
+                Some((screen, form, data)) => self.note(format!(
+                    "{side} ddui-show screen={screen:?} form={form} data={data:?}"
+                )),
                 None => self.raw(side, packet),
             },
             (
@@ -121,7 +127,10 @@ impl Recorder {
     fn raw(&mut self, side: &str, packet: &Packet<'_>) {
         let strings = packets::strings(packet.bytes);
         let hex = packets::hex(packet.bytes, HEX_LIMIT);
-        self.note(format!("{side} packet id={} strings={strings:?} hex={hex}", packet.id));
+        self.note(format!(
+            "{side} packet id={} strings={strings:?} hex={hex}",
+            packet.id
+        ));
     }
 
     /// Takes the lines to write in this callback, keeping the rest for later ones.
@@ -142,4 +151,3 @@ impl Recorder {
         self.count
     }
 }
-

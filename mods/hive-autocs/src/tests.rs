@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::autocs::{AutoCs, FULL_LOBBY, PARTY_COMMAND, PICKER_FORM, PRESET, START_AFTER_TEAMS, WARP_COMMAND, strip};
+use crate::autocs::{
+    AutoCs, FULL_LOBBY, PARTY_COMMAND, PICKER_FORM, PRESET, START_AFTER_TEAMS, WARP_COMMAND, strip,
+};
 use crate::packets::{self, TEXT, TEXT_CHAT, TEXT_RAW};
 use crate::recorder::{MORE, Recorder, TAG, Way};
 use crate::wire::{Reader, push_packet, split_batch, write_string, write_var_u32};
@@ -50,15 +52,20 @@ fn menu(form: u32, title: &str, content: &str, buttons: &[(&str, &str)]) -> Vec<
 }
 
 fn manage(form: u32) -> Vec<u8> {
-    menu(form, "Manage Your Server", "Select from the options below", &[
-        ("Game Settings", "All customisation items"),
-        ("Access & Permissions", ""),
-        ("Manage Presets", "Load or save presets"),
-        ("Start Game", "Start the game"),
-        ("Reset Settings", ""),
-        ("Kick Player", ""),
-        ("Stop Server", ""),
-    ])
+    menu(
+        form,
+        "Manage Your Server",
+        "Select from the options below",
+        &[
+            ("Game Settings", "All customisation items"),
+            ("Access & Permissions", ""),
+            ("Manage Presets", "Load or save presets"),
+            ("Start Game", "Start the game"),
+            ("Reset Settings", ""),
+            ("Kick Player", ""),
+            ("Stop Server", ""),
+        ],
+    )
 }
 
 /// Hive's access menus as recorded on 2026-11-06, shown with the form ID `form`: Access &
@@ -87,35 +94,50 @@ fn access_permissions_open(form: u32) -> Vec<u8> {
 }
 
 fn game_settings(form: u32) -> Vec<u8> {
-    menu(form, "Game Settings", "Here you can customise your server!", &[
-        ("Maximum Players", ""),
-        ("World Time", ""),
-        ("Set Roles", "Override selection"),
-        ("Map", "Override map voting"),
-        ("Bots", ""),
-        ("Go Back", ""),
-    ])
+    menu(
+        form,
+        "Game Settings",
+        "Here you can customise your server!",
+        &[
+            ("Maximum Players", ""),
+            ("World Time", ""),
+            ("Set Roles", "Override selection"),
+            ("Map", "Override map voting"),
+            ("Bots", ""),
+            ("Go Back", ""),
+        ],
+    )
 }
 
 fn presets(form: u32) -> Vec<u8> {
-    menu(form, "Preset Settings", "Load, save or create a new preset!", &[
-        ("Featured Presets", ""),
-        ("Load Preset By Code", ""),
-        ("Save Preset", ""),
-        ("Recent Presets", ""),
-        ("Saved Presets", ""),
-        ("Go Back", ""),
-    ])
+    menu(
+        form,
+        "Preset Settings",
+        "Load, save or create a new preset!",
+        &[
+            ("Featured Presets", ""),
+            ("Load Preset By Code", ""),
+            ("Save Preset", ""),
+            ("Recent Presets", ""),
+            ("Saved Presets", ""),
+            ("Go Back", ""),
+        ],
+    )
 }
 
 fn saved_presets(form: u32) -> Vec<u8> {
-    menu(form, "Saved Presets", "View all your saved presets for BedWars.", &[
-        ("midfight no regen", "AuUfBH"),
-        ("midfight regen", "6msmhs"),
-        ("new scrim rules", "k9DkoS"),
-        ("scrim prac", "g2m0OS"),
-        ("Go Back", ""),
-    ])
+    menu(
+        form,
+        "Saved Presets",
+        "View all your saved presets for BedWars.",
+        &[
+            ("midfight no regen", "AuUfBH"),
+            ("midfight regen", "6msmhs"),
+            ("new scrim rules", "k9DkoS"),
+            ("scrim prac", "g2m0OS"),
+            ("Go Back", ""),
+        ],
+    )
 }
 
 fn load_preset(form: u32) -> Vec<u8> {
@@ -123,17 +145,26 @@ fn load_preset(form: u32) -> Vec<u8> {
         form,
         "Load Preset?",
         "You are about to load the following preset:\n\n§d§lnew scrim rules\n§r§6Shop Settings",
-        &[("Confirm", "This will overwrite"), ("Delete Preset", ""), ("Go Back", "")],
+        &[
+            ("Confirm", "This will overwrite"),
+            ("Delete Preset", ""),
+            ("Go Back", ""),
+        ],
     )
 }
 
 fn maps(form: u32) -> Vec<u8> {
-    menu(form, "Map", "This menu allows you to select any available map.", &[
-        ("Random", "Selected"),
-        ("Autumn", "Select to equip"),
-        ("Soul's End", "Select to equip"),
-        ("Temple", "Select to equip"),
-    ])
+    menu(
+        form,
+        "Map",
+        "This menu allows you to select any available map.",
+        &[
+            ("Random", "Selected"),
+            ("Autumn", "Select to equip"),
+            ("Soul's End", "Select to equip"),
+            ("Temple", "Select to equip"),
+        ],
+    )
 }
 
 /// The Set Roles player list: each player with their current role.
@@ -198,7 +229,10 @@ impl Harness {
     }
 
     fn named(me: &'static str) -> Self {
-        Self { auto: AutoCs::new(me), me }
+        Self {
+            auto: AutoCs::new(me),
+            me,
+        }
     }
 
     /// Feeds a batch; returns whether each packet was kept, then runs ticks until the answers
@@ -221,10 +255,12 @@ impl Harness {
             let (to_client, to_server) = self.auto.tick();
             for packet in split_batch(&to_client).unwrap() {
                 match packet.id {
-                    TEXT => sent.said.push(strip(&packets::read_text(&packet).unwrap().message)),
-                    packets::MODAL_FORM_REQUEST => {
-                        sent.forms.push(packets::read_form_request(&packet).unwrap())
-                    }
+                    TEXT => sent
+                        .said
+                        .push(strip(&packets::read_text(&packet).unwrap().message)),
+                    packets::MODAL_FORM_REQUEST => sent
+                        .forms
+                        .push(packets::read_form_request(&packet).unwrap()),
                     other => panic!("unexpected packet {other} to the client"),
                 }
             }
@@ -248,7 +284,11 @@ impl Harness {
     fn press(&mut self, batch: &[u8], form: u32, button: usize) {
         let (kept, sent) = self.server(batch);
         assert!(!kept, "form {form} should be hidden from the player");
-        assert_eq!(sent.answers, vec![(form, Some(format!("{button}\n")))], "form {form}");
+        assert_eq!(
+            sent.answers,
+            vec![(form, Some(format!("{button}\n")))],
+            "form {form}"
+        );
     }
 
     /// A Hive menu the mod must close.
@@ -269,7 +309,11 @@ impl Harness {
         self.press(&access_permissions_open(next + 2), next + 2, 3); // Go Back
         let sent = self.close(&manage(next + 3), next + 3);
         assert_eq!(sent.commands, vec![WARP_COMMAND.to_string()]);
-        assert!(sent.said("Opened the server to everyone"), "{:?}", sent.said);
+        assert!(
+            sent.said("Opened the server to everyone"),
+            "{:?}",
+            sent.said
+        );
         sent
     }
 
@@ -287,8 +331,10 @@ impl Harness {
         };
         let mut form = first;
         loop {
-            let list: Vec<(&str, &str)> =
-                players.iter().map(|(name, role)| (name.as_str(), role.as_str())).collect();
+            let list: Vec<(&str, &str)> = players
+                .iter()
+                .map(|(name, role)| (name.as_str(), role.as_str()))
+                .collect();
             let (kept, sent) = self.server(&roles(form, &list));
             assert!(!kept, "form {form} should be hidden from the player");
             let Some(index) = pressed(&sent, form) else {
@@ -313,22 +359,43 @@ impl Harness {
         let sent = self.run(40);
         assert_eq!(sent.commands, vec!["/cs".to_string()]);
         self.press(
-            &menu(2, "Custom Server Menu", "", &[("Create Server", "Choose a game"), ("Your Invites", "")]),
+            &menu(
+                2,
+                "Custom Server Menu",
+                "",
+                &[("Create Server", "Choose a game"), ("Your Invites", "")],
+            ),
             2,
             0,
         );
         self.press(
-            &menu(3, "Create Server", "", &[("BedWars", ""), ("BlockDrop", ""), ("BedWars Hub", "")]),
+            &menu(
+                3,
+                "Create Server",
+                "",
+                &[("BedWars", ""), ("BlockDrop", ""), ("BedWars Hub", "")],
+            ),
             3,
             0,
         );
         self.press(
-            &menu(4, "Create Server", "", &[("Solos / Regular", ""), ("Duos", ""), ("Squads", ""), ("Go back", "")]),
+            &menu(
+                4,
+                "Create Server",
+                "",
+                &[
+                    ("Solos / Regular", ""),
+                    ("Duos", ""),
+                    ("Squads", ""),
+                    ("Go back", ""),
+                ],
+            ),
             4,
             2,
         );
         let me = self.me;
-        self.server(&system(&format!("§a§l» §r§7{me} joined. §8[{lobby}/16]"))).1
+        self.server(&system(&format!("§a§l» §r§7{me} joined. §8[{lobby}/16]")))
+            .1
     }
 
     /// `!autocs temple` up to arriving, alone, in the server.
@@ -380,10 +447,19 @@ fn form_packets_decode() {
     packets::form_response(&mut batch, 7, "2\n");
     packets::form_cancel(&mut batch, 7);
     let packets = split_batch(&batch).unwrap();
-    assert_eq!(packets::read_form_request(&packets[0]), Some((7, r#"{"type":"form"}"#.into())));
-    assert_eq!(packets::read_form_response(&packets[1]), Some((7, Some("2\n".into()), None)));
+    assert_eq!(
+        packets::read_form_request(&packets[0]),
+        Some((7, r#"{"type":"form"}"#.into()))
+    );
+    assert_eq!(
+        packets::read_form_response(&packets[1]),
+        Some((7, Some("2\n".into()), None))
+    );
     // As the recording shows for a closed menu: no response, reason 0.
-    assert_eq!(packets::read_form_response(&packets[2]), Some((7, None, Some(0))));
+    assert_eq!(
+        packets::read_form_response(&packets[2]),
+        Some((7, None, Some(0)))
+    );
 }
 
 #[test]
@@ -426,7 +502,11 @@ fn recorder_logs_forms_and_chat() {
     recorder.batch(Way::FromServer, &split_batch(&batch).unwrap());
     let lines = recorder.drain();
     assert!(lines.iter().any(|line| line.contains("msg=\"gg\"")));
-    assert!(lines.iter().any(|line| line.contains("form=5") && line.contains("Manage Your Server")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("form=5") && line.contains("Manage Your Server"))
+    );
 }
 
 #[test]
@@ -437,7 +517,10 @@ fn long_lines_split_on_char_boundaries() {
     assert!(lines.len() > 1);
     assert!(lines[0].starts_with(TAG) && lines[1].starts_with(MORE));
     assert!(lines.iter().all(|line| line.len() < 1024));
-    let text: String = lines.iter().map(|line| line.split_once(' ').unwrap().1).collect();
+    let text: String = lines
+        .iter()
+        .map(|line| line.split_once(' ').unwrap().1)
+        .collect();
     assert_eq!(text, "é".repeat(1000));
 }
 
@@ -457,7 +540,10 @@ fn strings_finds_length_prefixed_text() {
     let mut bytes = vec![0xff, 0x02];
     write_string(&mut bytes, "hive:custom_server");
     bytes.push(0);
-    assert_eq!(packets::strings(&bytes), vec!["hive:custom_server".to_string()]);
+    assert_eq!(
+        packets::strings(&bytes),
+        vec!["hive:custom_server".to_string()]
+    );
 }
 
 // ---- automatic custom server --------------------------------------------------------------------
@@ -469,11 +555,17 @@ fn autocs_shows_the_map_menu_and_starts_on_a_pick() {
     assert!(!kept, "!autocs must not reach Hive");
     let (form, json) = &sent.forms[0];
     assert_eq!(*form, PICKER_FORM);
-    let temple = picker_buttons(json).iter().position(|(name, _, _)| name == "Temple").unwrap();
+    let temple = picker_buttons(json)
+        .iter()
+        .position(|(name, _, _)| name == "Temple")
+        .unwrap();
     let mut answer = Vec::new();
     packets::form_response(&mut answer, PICKER_FORM, &format!("{temple}\n"));
     let (kept, sent) = h.client(&answer);
-    assert!(!kept, "the answer to the mod's own menu must not reach Hive");
+    assert!(
+        !kept,
+        "the answer to the mod's own menu must not reach Hive"
+    );
     assert!(sent.said("Map Temple"));
     assert_eq!(sent.commands, vec![PARTY_COMMAND.to_string()]);
 }
@@ -524,34 +616,62 @@ fn full_run_creates_sets_preset_map_and_teams() {
     // Players join; the one that fills the lobby brings the reminder, no one before it.
     let others = ["Charlie", "P2", "P3", "P4", "P5", "P6", "P7"];
     for (joined, name) in (2..FULL_LOBBY).zip(others) {
-        let (_, sent) = h.server(&system(&format!("§a§l» §r§7{name} joined. §8[{joined}/16]")));
+        let (_, sent) = h.server(&system(&format!(
+            "§a§l» §r§7{name} joined. §8[{joined}/16]"
+        )));
         assert!(sent.said.is_empty(), "{:?}", sent.said);
     }
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7P7 joined. §8[{FULL_LOBBY}/16]")));
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7P7 joined. §8[{FULL_LOBBY}/16]"
+    )));
     assert!(sent.said(&format!("{FULL_LOBBY}/{FULL_LOBBY} players are in")));
 
     // Right-click: Manage → Game Settings → Set Roles.
     h.press(&manage(20), 20, 0);
     h.press(&game_settings(21), 21, 2);
-    let mut players: Vec<(String, String)> = ["Boldworks", "Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]
-        .iter()
-        .map(|name| (name.to_string(), "Player".to_owned()))
-        .collect();
+    let mut players: Vec<(String, String)> = [
+        "Boldworks",
+        "Charlie",
+        "H0nri",
+        "P2",
+        "P3",
+        "P4",
+        "P5",
+        "P6",
+    ]
+    .iter()
+    .map(|name| (name.to_string(), "Player".to_owned()))
+    .collect();
     assert_eq!(players.len() as u32, FULL_LOBBY);
     let (sent, next) = h.set_roles(22, &mut players);
     let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
     // RED: the user and H0nri, who is in the party; BLUE: everyone else.
-    assert_eq!(teams, ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]);
-    assert!(sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"), "{:?}", sent.said);
+    assert_eq!(
+        teams,
+        ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]
+    );
+    assert!(
+        sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"),
+        "{:?}",
+        sent.said
+    );
     if !START_AFTER_TEAMS {
-        assert!(sent.said("Teams are set. Start the game when you're ready"), "{:?}", sent.said);
+        assert!(
+            sent.said("Teams are set. Start the game when you're ready"),
+            "{:?}",
+            sent.said
+        );
     }
     // Closing Set Roles shows Game Settings, then Manage Your Server: back up, then start.
     h.press(&game_settings(next), next, 5); // Go Back
     if START_AFTER_TEAMS {
         let (kept, sent) = h.server(&manage(next + 1));
         assert!(!kept);
-        assert_eq!(sent.answers, vec![(next + 1, Some("3\n".into()))], "Start Game");
+        assert_eq!(
+            sent.answers,
+            vec![(next + 1, Some("3\n".into()))],
+            "Start Game"
+        );
         assert!(sent.said("Starting the game"));
     } else {
         // Nothing more to say on the final close: "Teams are set" came with Set Roles.
@@ -571,11 +691,20 @@ fn players_who_join_the_party_after_autocs_are_put_on_red() {
     // H0nri joins the party and the server later; seven others fill the lobby.
     let others = ["Charlie", "H0nri", "P2", "P3", "P4", "P5"];
     for (joined, name) in (2..FULL_LOBBY).zip(others) {
-        h.server(&system(&format!("§a§l» §r§7{name} joined. §8[{joined}/16]")));
+        h.server(&system(&format!(
+            "§a§l» §r§7{name} joined. §8[{joined}/16]"
+        )));
     }
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7P6 joined. §8[{FULL_LOBBY}/16]")));
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7P6 joined. §8[{FULL_LOBBY}/16]"
+    )));
     // The lobby is full: the party is read again.
-    assert_eq!(sent.commands, vec![PARTY_COMMAND.to_string()], "{:?}", sent.commands);
+    assert_eq!(
+        sent.commands,
+        vec![PARTY_COMMAND.to_string()],
+        "{:?}",
+        sent.commands
+    );
     // Join messages arriving meanwhile do not make anyone a party member.
     h.server(&system("§a§l» §r§7Charlie joined. §8[8/16]"));
     h.server(&system("Party members (2): Boldworks, H0nri"));
@@ -583,14 +712,30 @@ fn players_who_join_the_party_after_autocs_are_put_on_red() {
 
     h.press(&manage(20), 20, 0);
     h.press(&game_settings(21), 21, 2);
-    let mut players: Vec<(String, String)> = ["Boldworks", "Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]
-        .iter()
-        .map(|name| (name.to_string(), "Player".to_owned()))
-        .collect();
+    let mut players: Vec<(String, String)> = [
+        "Boldworks",
+        "Charlie",
+        "H0nri",
+        "P2",
+        "P3",
+        "P4",
+        "P5",
+        "P6",
+    ]
+    .iter()
+    .map(|name| (name.to_string(), "Player".to_owned()))
+    .collect();
     let (sent, _) = h.set_roles(22, &mut players);
     let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
-    assert_eq!(teams, ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]);
-    assert!(sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"), "{:?}", sent.said);
+    assert_eq!(
+        teams,
+        ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]
+    );
+    assert!(
+        sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"),
+        "{:?}",
+        sent.said
+    );
 }
 
 #[test]
@@ -609,11 +754,29 @@ fn an_access_menu_without_a_public_button_is_skipped_without_a_warp() {
     h.press(&manage(14), 14, 1);
     h.press(&access_permissions(15), 15, 2);
     // Hive words it some other way: go back, say so, and warp nobody into a closed server.
-    let (kept, sent) = h.server(&menu(16, "Change Access Mode", "", &[("Set To Friends-Only Mode", ""), ("Go Back", "")]));
+    let (kept, sent) = h.server(&menu(
+        16,
+        "Change Access Mode",
+        "",
+        &[("Set To Friends-Only Mode", ""), ("Go Back", "")],
+    ));
     assert!(!kept);
-    assert_eq!(sent.answers, vec![(16, Some("1
-".into()))]);
-    assert!(sent.said("couldn't find the button that opens the server"), "{:?}", sent.said);
+    assert_eq!(
+        sent.answers,
+        vec![(
+            16,
+            Some(
+                "1
+"
+                .into()
+            )
+        )]
+    );
+    assert!(
+        sent.said("couldn't find the button that opens the server"),
+        "{:?}",
+        sent.said
+    );
     h.press(&access_permissions(17), 17, 4);
     let sent = h.close(&manage(18), 18);
     assert!(sent.commands.is_empty(), "{:?}", sent.commands);
@@ -624,18 +787,41 @@ fn more_than_a_full_lobby_does_not_start() {
     let mut h = Harness::new();
     h.join_lobby("");
     h.preset_and_map();
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7Eighth joined. §8[{FULL_LOBBY}/16]")));
-    assert!(sent.said("Right-click the settings item"), "{:?}", sent.said);
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7Eighth joined. §8[{FULL_LOBBY}/16]"
+    )));
+    assert!(
+        sent.said("Right-click the settings item"),
+        "{:?}",
+        sent.said
+    );
 
     // A ninth player: the go-ahead is taken back and the right-click is the player's.
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7Ninth joined. §8[{}/16]", FULL_LOBBY + 1)));
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7Ninth joined. §8[{}/16]",
+        FULL_LOBBY + 1
+    )));
     assert!(sent.said("too many to start"), "{:?}", sent.said);
-    assert!(!sent.said("Right-click the settings item"), "{:?}", sent.said);
-    assert!(h.server(&manage(20)).0, "no teams are set with {} players", FULL_LOBBY + 1);
+    assert!(
+        !sent.said("Right-click the settings item"),
+        "{:?}",
+        sent.said
+    );
+    assert!(
+        h.server(&manage(20)).0,
+        "no teams are set with {} players",
+        FULL_LOBBY + 1
+    );
 
     // One leaves: exactly full again, so it is asked for once more.
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7Ninth left. §8[{FULL_LOBBY}/16]")));
-    assert!(sent.said("Right-click the settings item"), "{:?}", sent.said);
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7Ninth left. §8[{FULL_LOBBY}/16]"
+    )));
+    assert!(
+        sent.said("Right-click the settings item"),
+        "{:?}",
+        sent.said
+    );
 }
 
 #[test]
@@ -689,7 +875,12 @@ fn a_missing_preset_is_skipped() {
     h.join_lobby("");
     h.press(&manage(5), 5, 2);
     h.press(&presets(6), 6, 4);
-    let (_, sent) = h.server(&menu(7, "Saved Presets", "", &[("scrim prac", ""), ("Go Back", "")]));
+    let (_, sent) = h.server(&menu(
+        7,
+        "Saved Presets",
+        "",
+        &[("scrim prac", ""), ("Go Back", "")],
+    ));
     assert!(sent.said("No saved preset called"));
     assert_eq!(sent.answers, vec![(7, Some("1\n".into()))]);
 }
@@ -737,7 +928,10 @@ fn mark_adds_a_note() {
     let (kept, sent) = h.client(&chat("!mark picking the map"));
     assert!(!kept);
     assert!(sent.said("Note added"));
-    assert_eq!(h.auto.take_notes(), vec!["MARK picking the map".to_string()]);
+    assert_eq!(
+        h.auto.take_notes(),
+        vec!["MARK picking the map".to_string()]
+    );
 }
 
 // ---- Hive's real menus --------------------------------------------------------------------------
@@ -804,7 +998,10 @@ mod command_list {
     fn hive_list(extra: Option<&str>) -> Vec<u8> {
         let mut list = AvailableCommands {
             enum_values: vec!["temple".into(), "survival".into()],
-            enum_data: vec![CommandEnum { name: "Mode".into(), values: vec![wire::U32LE(1)] }],
+            enum_data: vec![CommandEnum {
+                name: "Mode".into(),
+                values: vec![wire::U32LE(1)],
+            }],
             ..Default::default()
         };
         for name in ["cs", "p"].into_iter().chain(extra) {
@@ -835,7 +1032,11 @@ mod command_list {
         let batch = hive_list(None);
         let packet = &split_batch(&batch).unwrap()[0];
         let list = decode(&with_autocs(packet.bytes).expect("rewritten"));
-        let names: Vec<_> = list.commands.iter().map(|c| c.name.to_string_lossy().into_owned()).collect();
+        let names: Vec<_> = list
+            .commands
+            .iter()
+            .map(|c| c.name.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(names, ["cs", "p", NAME]);
         let autocs = list.commands.last().unwrap();
         assert_eq!(autocs.overloads.len(), 3);
@@ -844,14 +1045,28 @@ mod command_list {
             let symbol = autocs.overloads[overload].parameter_data[0].parse_symbol.0;
             assert_eq!(symbol & 0x30_0000, 0x30_0000, "valid enum");
             let entry = &list.enum_data[(symbol & 0xF_FFFF) as usize];
-            entry.values.iter().map(|i| list.enum_values[i.0 as usize].to_string_lossy().into_owned()).collect()
+            entry
+                .values
+                .iter()
+                .map(|i| {
+                    list.enum_values[i.0 as usize]
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
         };
         let maps = values(1);
         assert_eq!(maps.len(), MAPS.len());
         assert!(maps.contains(&"souls_end".to_string()) && maps.contains(&"temple".to_string()));
         assert_eq!(values(2), ACTIONS);
         // "temple" was already listed: reused, not repeated; Hive's own enum is untouched.
-        assert_eq!(list.enum_values.iter().filter(|v| v.to_string_lossy() == "temple").count(), 1);
+        assert_eq!(
+            list.enum_values
+                .iter()
+                .filter(|v| v.to_string_lossy() == "temple")
+                .count(),
+            1
+        );
         assert_eq!(list.enum_data[0].values, vec![wire::U32LE(1)]);
     }
 
@@ -872,7 +1087,10 @@ mod command_list {
         assert_eq!(slug("O2"), "o2");
         for map in MAPS {
             let slug = slug(map);
-            assert!(!slug.is_empty() && slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "{slug}");
+            assert!(
+                !slug.is_empty() && slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "{slug}"
+            );
         }
     }
 
@@ -902,13 +1120,34 @@ mod pairings {
     #[test]
     fn every_map_has_the_listed_opponent() {
         let expected = |map: &str| match map {
-            "Autumn" | "Lumora" | "Pirates" | "Prisma" | "Soul's End" | "Spring (Spring)"
-            | "Summer (Summer)" | "Temple" | "Winter (Winterfest)" | "Cobalt" | "Orion"
-            | "Quantum" | "Serrano" => Some("BLUE"),
-            "Cyberspace" | "Hanging Gardens" | "Hanging Gardens (Spring)" | "Rome" | "Ruins"
-            | "O2" | "Tropical" => Some("YELLOW"),
-            "Coven (Halloween)" | "Gingerbread (Winterfest)" | "Grove" | "Summer Coast"
-            | "Jotunheim" | "Monster Labs (Halloween)" | "Tesla Labs" | "Railway" => Some("GREEN"),
+            "Autumn"
+            | "Lumora"
+            | "Pirates"
+            | "Prisma"
+            | "Soul's End"
+            | "Spring (Spring)"
+            | "Summer (Summer)"
+            | "Temple"
+            | "Winter (Winterfest)"
+            | "Cobalt"
+            | "Orion"
+            | "Quantum"
+            | "Serrano" => Some("BLUE"),
+            "Cyberspace"
+            | "Hanging Gardens"
+            | "Hanging Gardens (Spring)"
+            | "Rome"
+            | "Ruins"
+            | "O2"
+            | "Tropical" => Some("YELLOW"),
+            "Coven (Halloween)"
+            | "Gingerbread (Winterfest)"
+            | "Grove"
+            | "Summer Coast"
+            | "Jotunheim"
+            | "Monster Labs (Halloween)"
+            | "Tesla Labs"
+            | "Railway" => Some("GREEN"),
             "Random" => None,
             other => panic!("{other} has no expected pairing"),
         };
@@ -922,9 +1161,16 @@ mod pairings {
         use crate::autocs::pairing;
         // Confirmed by the player in their own games on 2026-11-06.
         let tested = [
-            ("Tropical", "YELLOW"), ("Cobalt", "BLUE"), ("Jotunheim", "GREEN"),
-            ("Monster Labs (Halloween)", "GREEN"), ("O2", "YELLOW"), ("Orion", "BLUE"),
-            ("Quantum", "BLUE"), ("Serrano", "BLUE"), ("Tesla Labs", "GREEN"), ("Railway", "GREEN"),
+            ("Tropical", "YELLOW"),
+            ("Cobalt", "BLUE"),
+            ("Jotunheim", "GREEN"),
+            ("Monster Labs (Halloween)", "GREEN"),
+            ("O2", "YELLOW"),
+            ("Orion", "BLUE"),
+            ("Quantum", "BLUE"),
+            ("Serrano", "BLUE"),
+            ("Tesla Labs", "GREEN"),
+            ("Railway", "GREEN"),
         ];
         for (map, team) in tested {
             assert_eq!(pairing(map), Some((team, true)), "{map}");
@@ -951,7 +1197,10 @@ mod pairings {
             .map(|name| (name.to_string(), "Select to equip"))
             .collect();
         let buttons: Vec<(&str, &str)> = names.iter().map(|(n, d)| (n.as_str(), *d)).collect();
-        let index = buttons.iter().position(|(name, _)| name.eq_ignore_ascii_case(map)).unwrap();
+        let index = buttons
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(map))
+            .unwrap();
         h.press(&menu(12, "Map", "", &buttons), 12, index);
         h.press(&game_settings(13), 13, 2);
         h
@@ -961,7 +1210,10 @@ mod pairings {
     fn eight(order: [&str; 3]) -> Vec<(String, String)> {
         let mut names: Vec<&str> = order.to_vec();
         names.extend(["P2", "P3", "P4", "P5", "P6"]);
-        names.iter().map(|name| (name.to_string(), "Player".to_owned())).collect()
+        names
+            .iter()
+            .map(|name| (name.to_string(), "Player".to_owned()))
+            .collect()
     }
 
     #[test]
@@ -970,13 +1222,21 @@ mod pairings {
         let mut players = eight(["Boldworks", "Charlie", "H0nri"]);
         let (sent, _) = h.set_roles(20, &mut players);
         assert_eq!(players[1].1, "YELLOW");
-        assert!(sent.said("RED Boldworks, H0nri | YELLOW Charlie"), "{:?}", sent.said);
+        assert!(
+            sent.said("RED Boldworks, H0nri | YELLOW Charlie"),
+            "{:?}",
+            sent.said
+        );
     }
 
     #[test]
     fn a_green_map_puts_the_others_on_green() {
         let mut h = at_roles("grove");
-        h.press(&roles(20, &[("Boldworks", "RED"), ("Charlie", "Player")]), 20, 1);
+        h.press(
+            &roles(20, &[("Boldworks", "RED"), ("Charlie", "Player")]),
+            20,
+            1,
+        );
         h.press(&team_choice(21, "Charlie"), 21, 3); // GREEN
     }
 
@@ -988,7 +1248,11 @@ mod pairings {
         let (sent, _) = h.set_roles(20, &mut players);
         // Charlie is skipped: Hive places him.
         assert_eq!(players[0].1, "Player");
-        assert!(sent.said("RED H0nri, Boldworks | Hive places Charlie"), "{:?}", sent.said);
+        assert!(
+            sent.said("RED H0nri, Boldworks | Hive places Charlie"),
+            "{:?}",
+            sent.said
+        );
     }
 }
 
@@ -1004,7 +1268,10 @@ fn picker_buttons(json: &str) -> Vec<(String, String, Option<String>)> {
         .map(|button| {
             let text = strip(button["text"].as_str().unwrap());
             let (name, detail) = text.split_once('\n').unwrap();
-            let image = button.pointer("/image/data").and_then(|url| url.as_str()).map(str::to_owned);
+            let image = button
+                .pointer("/image/data")
+                .and_then(|url| url.as_str())
+                .map(str::to_owned);
             (name.to_owned(), detail.to_owned(), image)
         })
         .collect()
@@ -1024,13 +1291,19 @@ mod map_menu {
     fn every_map_shows_the_team_faced() {
         let buttons = open();
         assert_eq!(buttons.len(), MAPS.len());
-        assert_eq!((buttons[0].0.as_str(), buttons[0].1.as_str()), ("Random", "Hive picks the map"));
+        assert_eq!(
+            (buttons[0].0.as_str(), buttons[0].1.as_str()),
+            ("Random", "Hive picks the map")
+        );
         let detail = |name: &str| buttons.iter().find(|b| b.0 == name).unwrap().1.clone();
         assert_eq!(detail("Temple"), "vs BLUE");
         assert_eq!(detail("Rome"), "vs YELLOW");
         assert_eq!(detail("Grove"), "vs GREEN");
         assert_eq!(detail("Railway"), "vs GREEN");
-        assert!(buttons[1..].iter().all(|b| b.1.starts_with("vs ")), "{buttons:?}");
+        assert!(
+            buttons[1..].iter().all(|b| b.1.starts_with("vs ")),
+            "{buttons:?}"
+        );
     }
 
     #[test]
@@ -1045,7 +1318,10 @@ mod map_menu {
         let mut h = Harness::new();
         let (_, sent) = h.client(&chat("!autocs"));
         let buttons = picker_buttons(&sent.forms[0].1);
-        let grove = buttons.iter().position(|(name, _, _)| name == "Grove").unwrap();
+        let grove = buttons
+            .iter()
+            .position(|(name, _, _)| name == "Grove")
+            .unwrap();
         let mut answer = Vec::new();
         packets::form_response(&mut answer, PICKER_FORM, &format!("{grove}\n"));
         let (_, sent) = h.client(&answer);
@@ -1072,10 +1348,22 @@ mod map_menu {
         h.press(&presets(9), 9, 5);
         h.press(&manage(10), 10, 0);
         h.press(&game_settings(11), 11, 3);
-        h.press(&menu(12, "Map", "", &[("Random", ""), ("Brand New", ""), ("Temple", "")]), 12, 2);
+        h.press(
+            &menu(
+                12,
+                "Map",
+                "",
+                &[("Random", ""), ("Brand New", ""), ("Temple", "")],
+            ),
+            12,
+            2,
+        );
         h.client(&chat("!autocs stop"));
         let (_, sent) = h.client(&chat("!autocs"));
-        let names: Vec<String> = picker_buttons(&sent.forms[0].1).into_iter().map(|b| b.0).collect();
+        let names: Vec<String> = picker_buttons(&sent.forms[0].1)
+            .into_iter()
+            .map(|b| b.0)
+            .collect();
         assert_eq!(names, ["Random", "Temple", "Brand New"]);
     }
 }
@@ -1084,15 +1372,40 @@ mod map_menu {
 fn the_players_list_orders_the_menu() {
     let mut h = Harness::new();
     let (_, sent) = h.client(&chat("!autocs"));
-    let names: Vec<String> = picker_buttons(&sent.forms[0].1).into_iter().map(|b| b.0).collect();
+    let names: Vec<String> = picker_buttons(&sent.forms[0].1)
+        .into_iter()
+        .map(|b| b.0)
+        .collect();
     let expected = [
         "Random",
         // The player's list, top to bottom.
-        "Temple", "Rome", "Ruins", "Spring (Spring)", "Summer (Summer)", "Autumn",
-        "Winter (Winterfest)", "Pirates", "Hanging Gardens", "Hanging Gardens (Spring)", "Tropical",
-        "Cyberspace", "Prisma", "Soul's End", "Gingerbread (Winterfest)", "Grove", "O2", "Cobalt",
-        "Jotunheim", "Coven (Halloween)", "Summer Coast", "Serrano", "Lumora", "Tesla Labs",
-        "Monster Labs (Halloween)", "Orion", "Quantum",
+        "Temple",
+        "Rome",
+        "Ruins",
+        "Spring (Spring)",
+        "Summer (Summer)",
+        "Autumn",
+        "Winter (Winterfest)",
+        "Pirates",
+        "Hanging Gardens",
+        "Hanging Gardens (Spring)",
+        "Tropical",
+        "Cyberspace",
+        "Prisma",
+        "Soul's End",
+        "Gingerbread (Winterfest)",
+        "Grove",
+        "O2",
+        "Cobalt",
+        "Jotunheim",
+        "Coven (Halloween)",
+        "Summer Coast",
+        "Serrano",
+        "Lumora",
+        "Tesla Labs",
+        "Monster Labs (Halloween)",
+        "Orion",
+        "Quantum",
         // Not listed.
         "Railway",
     ];
@@ -1122,7 +1435,11 @@ mod invites_and_spectators {
 
     /// `!autocs temple` as WBSever up to arriving in the server.
     fn new_server(h: &mut Harness) -> Sent {
-        h.create("!autocs temple", "You have to be in a party to run this command.", 1)
+        h.create(
+            "!autocs temple",
+            "You have to be in a party to run this command.",
+            1,
+        )
     }
 
     #[test]
@@ -1150,7 +1467,12 @@ mod invites_and_spectators {
         assert!(kept, "Hive's message still shows");
         assert!(sent.said("I'll invite boldworks to your next games too"));
         // The same invite again is not announced twice.
-        assert!(h.server(&system("§a§l» §rInvite sent to §eboldworks")).1.said.is_empty());
+        assert!(
+            h.server(&system("§a§l» §rInvite sent to §eboldworks"))
+                .1
+                .said
+                .is_empty()
+        );
 
         // Next game: preset, map, then the invite, through Hive's real menus.
         let sent = new_server(&mut h);
@@ -1171,15 +1493,27 @@ mod invites_and_spectators {
         h.press(&recorded(9), 9, 1); // Invite Username
         let (kept, sent) = h.server(&recorded(10));
         assert!(!kept);
-        assert_eq!(sent.answers, vec![(10, Some("[null,\"boldworks\"]\n".into()))]);
+        assert_eq!(
+            sent.answers,
+            vec![(10, Some("[null,\"boldworks\"]\n".into()))]
+        );
         // Hive confirms; that is the mod's own invite, not a new one to remember.
-        assert!(h.server(&system("§a§l» §rInvite sent to §eboldworks")).1.said.is_empty());
+        assert!(
+            h.server(&system("§a§l» §rInvite sent to §eboldworks"))
+                .1
+                .said
+                .is_empty()
+        );
         h.press(&recorded(11), 11, 2); // Invite Player again: Go Back
         h.press(&access_permissions_open(33), 33, 3); // Access & Permissions: Go Back
         let sent = h.close(&manage(15), 15);
         assert!(sent.said("Set preset new scrim rules and map Temple"));
         assert!(sent.said("Invited boldworks"));
-        assert!(sent.said("Opened the server to everyone"), "{:?}", sent.said);
+        assert!(
+            sent.said("Opened the server to everyone"),
+            "{:?}",
+            sent.said
+        );
         assert_eq!(sent.commands, vec![WARP_COMMAND.to_string()]);
     }
 
@@ -1189,11 +1523,28 @@ mod invites_and_spectators {
         // Hive's message when a co-host invites someone (recorded 2026-11-06).
         let (kept, sent) = h.server(&system("§a§l» §r§eSuperHason §rsent an invite to §eKeizYT"));
         assert!(kept, "Hive's message still shows");
-        assert!(sent.said("I'll invite KeizYT (invited by SuperHason) to your next games too"), "{:?}", sent.said);
-        assert_eq!(h.auto.take_notes().last().unwrap(), "AUTOCS remember invite \"KeizYT\" by=Some(\"SuperHason\")");
+        assert!(
+            sent.said("I'll invite KeizYT (invited by SuperHason) to your next games too"),
+            "{:?}",
+            sent.said
+        );
+        assert_eq!(
+            h.auto.take_notes().last().unwrap(),
+            "AUTOCS remember invite \"KeizYT\" by=Some(\"SuperHason\")"
+        );
         // Not announced twice, and not added again when the host invites the same player.
-        assert!(h.server(&system("§a§l» §r§eSuperHason §rsent an invite to §eKeizYT")).1.said.is_empty());
-        assert!(h.server(&system("§a§l» §rInvite sent to §ekeizyt")).1.said.is_empty());
+        assert!(
+            h.server(&system("§a§l» §r§eSuperHason §rsent an invite to §eKeizYT"))
+                .1
+                .said
+                .is_empty()
+        );
+        assert!(
+            h.server(&system("§a§l» §rInvite sent to §ekeizyt"))
+                .1
+                .said
+                .is_empty()
+        );
         // The next game invites them.
         let sent = new_server(&mut h);
         assert!(sent.said("and invite KeizYT"), "{:?}", sent.said);
@@ -1206,7 +1557,11 @@ mod invites_and_spectators {
             h.server(&system("Invite sent to H0nri"));
             let (kept, sent) = h.client(&command(typed));
             assert!(!kept, "{typed}");
-            assert!(sent.said("I won't invite H0nri again"), "{typed}: {:?}", sent.said);
+            assert!(
+                sent.said("I won't invite H0nri again"),
+                "{typed}: {:?}",
+                sent.said
+            );
         }
     }
 
@@ -1293,11 +1648,20 @@ mod invites_and_spectators {
         h.press(&manage(20), 20, 0);
         h.press(&game_settings(21), 21, 2);
         // H0nri is in the party, but asked to spectate: Spectator, not RED. The other eight play.
-        let mut players: Vec<(String, String)> =
-            ["Boldworks", "H0nri", "Charlie", "P2", "P3", "P4", "P5", "P6", "P7"]
-                .iter()
-                .map(|name| (name.to_string(), "Player".to_owned()))
-                .collect();
+        let mut players: Vec<(String, String)> = [
+            "Boldworks",
+            "H0nri",
+            "Charlie",
+            "P2",
+            "P3",
+            "P4",
+            "P5",
+            "P6",
+            "P7",
+        ]
+        .iter()
+        .map(|name| (name.to_string(), "Player".to_owned()))
+        .collect();
         let (sent, _) = h.set_roles(22, &mut players);
         assert_eq!(players[0].1, "RED");
         assert_eq!(players[1].1, "Spectator");
@@ -1315,12 +1679,25 @@ fn a_spectator_leaving_stops_counting() {
     h.client(&chat("@Watcher spec"));
     h.press(&manage(20), 20, 0);
     h.press(&game_settings(21), 21, 2);
-    h.press(&roles(22, &[("Boldworks", "Player"), ("Watcher", "Player")]), 22, 1);
+    h.press(
+        &roles(22, &[("Boldworks", "Player"), ("Watcher", "Player")]),
+        22,
+        1,
+    );
     h.press(&team_choice(23, "Watcher"), 23, 4);
-    h.close(&roles(24, &[("Boldworks", "Player"), ("Watcher", "Spectator")]), 24);
+    h.close(
+        &roles(24, &[("Boldworks", "Player"), ("Watcher", "Spectator")]),
+        24,
+    );
     h.server(&system("§a§l» §r§7Watcher left. §8[1/16]"));
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7P2 joined. §8[{FULL_LOBBY}/16]")));
-    assert!(sent.said(&format!("{FULL_LOBBY}/{FULL_LOBBY} players are in.")), "{:?}", sent.said);
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7P2 joined. §8[{FULL_LOBBY}/16]"
+    )));
+    assert!(
+        sent.said(&format!("{FULL_LOBBY}/{FULL_LOBBY} players are in.")),
+        "{:?}",
+        sent.said
+    );
 }
 
 #[test]
@@ -1329,7 +1706,9 @@ fn a_spectator_set_with_the_teams_holds_the_start() {
     h.join_lobby("");
     h.preset_and_map();
     // The lobby fills, and one of them asks to spectate in the same right-click.
-    h.server(&system(&format!("§a§l» §r§7Watcher joined. §8[{FULL_LOBBY}/16]")));
+    h.server(&system(&format!(
+        "§a§l» §r§7Watcher joined. §8[{FULL_LOBBY}/16]"
+    )));
     h.client(&chat("@Watcher spec"));
     h.press(&manage(20), 20, 0);
     h.press(&game_settings(21), 21, 2);
@@ -1337,14 +1716,21 @@ fn a_spectator_set_with_the_teams_holds_the_start() {
     players.extend((2..FULL_LOBBY).map(|n| (format!("P{n}"), "BLUE")));
     players.push(("Watcher".into(), "Player"));
     fn list<'a>(players: &'a [(String, &'a str)]) -> Vec<(&'a str, &'a str)> {
-        players.iter().map(|(name, role)| (name.as_str(), *role)).collect()
+        players
+            .iter()
+            .map(|(name, role)| (name.as_str(), *role))
+            .collect()
     }
     let last = players.len() - 1;
     h.press(&roles(22, &list(&players)), 22, last);
     h.press(&team_choice(23, "Watcher"), 23, 4);
     players[last].1 = "Spectator";
     let sent = h.close(&roles(24, &list(&players)), 24);
-    assert!(sent.said("waiting for 1 more player, so the teams aren't finished"), "{:?}", sent.said);
+    assert!(
+        sent.said("waiting for 1 more player, so the teams aren't finished"),
+        "{:?}",
+        sent.said
+    );
     // Said once: no "Teams:" line for unfinished teams, and no second status line.
     assert!(!sent.said("Teams:"), "{:?}", sent.said);
     assert!(!sent.said("When "), "{:?}", sent.said);
@@ -1352,10 +1738,21 @@ fn a_spectator_set_with_the_teams_holds_the_start() {
     h.press(&game_settings(25), 25, 5);
     let sent = h.close(&manage(26), 26);
     assert!(!sent.said("Starting"));
-    assert!(sent.said.is_empty(), "the wait was said once: {:?}", sent.said);
+    assert!(
+        sent.said.is_empty(),
+        "the wait was said once: {:?}",
+        sent.said
+    );
     // The missing player arrives: right-click again, they get a team, and the game starts.
-    let (_, sent) = h.server(&system(&format!("§a§l» §r§7Newcomer joined. §8[{}/16]", FULL_LOBBY + 1)));
-    assert!(sent.said("players are in (+1 spectating)"), "{:?}", sent.said);
+    let (_, sent) = h.server(&system(&format!(
+        "§a§l» §r§7Newcomer joined. §8[{}/16]",
+        FULL_LOBBY + 1
+    )));
+    assert!(
+        sent.said("players are in (+1 spectating)"),
+        "{:?}",
+        sent.said
+    );
     h.press(&manage(27), 27, 0);
     h.press(&game_settings(28), 28, 2);
     players.push(("Newcomer".into(), "Player"));
@@ -1383,10 +1780,17 @@ mod auto_spec {
         h.client(&chat("@Watcher spec"));
         h.press(&manage(20), 20, 0);
         h.press(&game_settings(21), 21, 2);
-        h.press(&roles(22, &[("Boldworks", "Player"), ("Watcher", "Player")]), 22, 1);
+        h.press(
+            &roles(22, &[("Boldworks", "Player"), ("Watcher", "Player")]),
+            22,
+            1,
+        );
         h.press(&team_choice(23, "Watcher"), 23, 4);
         h.server(&system("§a§l» §rSet §eWatcher's§r role to §bSpectator"));
-        h.close(&roles(24, &[("Boldworks", "Player"), ("Watcher", "Spectator")]), 24);
+        h.close(
+            &roles(24, &[("Boldworks", "Player"), ("Watcher", "Spectator")]),
+            24,
+        );
         h.press(&game_settings(25), 25, 5);
         h.close(&manage(26), 26);
         h
@@ -1394,7 +1798,11 @@ mod auto_spec {
 
     /// A new `!autocs` server, joined.
     fn next_server(h: &mut Harness) {
-        h.create("!autocs temple", "You have to be in a party to run this command.", 1);
+        h.create(
+            "!autocs temple",
+            "You have to be in a party to run this command.",
+            1,
+        );
         h.preset_and_map();
     }
 
@@ -1404,29 +1812,58 @@ mod auto_spec {
         next_server(&mut h);
         // Watcher joins: announced, and not counted as a player.
         let (_, sent) = h.server(&system("§a§l» §r§7Watcher joined. §8[2/16]"));
-        assert!(sent.said("Watcher will spectate, as in your last game"), "{:?}", sent.said);
+        assert!(
+            sent.said("Watcher will spectate, as in your last game"),
+            "{:?}",
+            sent.said
+        );
         let full = FULL_LOBBY + 1;
         for n in 3..full {
             let (_, sent) = h.server(&system(&format!("§a§l» §r§7P{n} joined. §8[{n}/16]")));
             assert!(!sent.said("players are in"), "{n}");
         }
         let (_, sent) = h.server(&system(&format!("§a§l» §r§7Last joined. §8[{full}/16]")));
-        assert!(sent.said(&format!("{FULL_LOBBY}/{FULL_LOBBY} players are in (+1 spectating)")), "{:?}", sent.said);
+        assert!(
+            sent.said(&format!(
+                "{FULL_LOBBY}/{FULL_LOBBY} players are in (+1 spectating)"
+            )),
+            "{:?}",
+            sent.said
+        );
         // The teams pass makes Watcher a spectator with no @ request.
         h.press(&manage(30), 30, 0);
         h.press(&game_settings(31), 31, 2);
-        let mut players: Vec<(String, &str)> = vec![("Boldworks".into(), "RED"), ("Watcher".into(), "Player")];
-        players.extend((3..=full).map(|n| (if n == full { "Last".to_string() } else { format!("P{n}") }, "BLUE")));
+        let mut players: Vec<(String, &str)> =
+            vec![("Boldworks".into(), "RED"), ("Watcher".into(), "Player")];
+        players.extend((3..=full).map(|n| {
+            (
+                if n == full {
+                    "Last".to_string()
+                } else {
+                    format!("P{n}")
+                },
+                "BLUE",
+            )
+        }));
         let list = |players: &[(String, &str)]| -> Vec<(String, String)> {
-            players.iter().map(|(name, role)| (name.clone(), role.to_string())).collect()
+            players
+                .iter()
+                .map(|(name, role)| (name.clone(), role.to_string()))
+                .collect()
         };
         let owned = list(&players);
-        let borrowed: Vec<(&str, &str)> = owned.iter().map(|(n, r)| (n.as_str(), r.as_str())).collect();
+        let borrowed: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, r)| (n.as_str(), r.as_str()))
+            .collect();
         h.press(&roles(32, &borrowed), 32, 1);
         h.press(&team_choice(33, "Watcher"), 33, 4);
         players[1].1 = "Spectator";
         let owned = list(&players);
-        let borrowed: Vec<(&str, &str)> = owned.iter().map(|(n, r)| (n.as_str(), r.as_str())).collect();
+        let borrowed: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, r)| (n.as_str(), r.as_str()))
+            .collect();
         let sent = h.close(&roles(34, &borrowed), 34);
         assert!(!sent.said("aren't finished"), "{:?}", sent.said);
     }
@@ -1439,7 +1876,11 @@ mod auto_spec {
         next_server(&mut h);
         let (_, sent) = h.server(&system("§a§l» §r§7Watcher joined. §8[2/16]"));
         assert!(!sent.said("will spectate"));
-        assert!(!sent.said("spectating"), "Watcher counts as a player: {:?}", sent.said);
+        assert!(
+            !sent.said("spectating"),
+            "Watcher counts as a player: {:?}",
+            sent.said
+        );
     }
 
     #[test]
@@ -1457,7 +1898,11 @@ mod auto_spec {
         let mut h = spectated_once();
         h.server(&system("Invite sent to Pal"));
         let (_, sent) = h.client(&chat("!autocs end"));
-        assert!(sent.said("I won't invite Pal again, and Watcher won't be made spectators"), "{:?}", sent.said);
+        assert!(
+            sent.said("I won't invite Pal again, and Watcher won't be made spectators"),
+            "{:?}",
+            sent.said
+        );
         next_server(&mut h);
         let (_, sent) = h.server(&system("§a§l» §r§7Watcher joined. §8[2/16]"));
         assert!(!sent.said("will spectate"));
@@ -1478,7 +1923,9 @@ fn a_spectator_back_to_playing_fills_the_lobby_and_the_mod_takes_over() {
     h.join_lobby("");
     h.preset_and_map();
     // FULL_LOBBY in the server, one of them a spectator: the teams wait.
-    h.server(&system(&format!("§a§l» §r§7Watcher joined. §8[{FULL_LOBBY}/16]")));
+    h.server(&system(&format!(
+        "§a§l» §r§7Watcher joined. §8[{FULL_LOBBY}/16]"
+    )));
     h.client(&chat("@Watcher spec"));
     h.press(&manage(20), 20, 0);
     h.press(&game_settings(21), 21, 2);
@@ -1486,14 +1933,20 @@ fn a_spectator_back_to_playing_fills_the_lobby_and_the_mod_takes_over() {
     players.extend((2..FULL_LOBBY).map(|n| (format!("P{n}"), "BLUE")));
     players.push(("Watcher".into(), "Player"));
     fn list<'a>(players: &'a [(String, &'a str)]) -> Vec<(&'a str, &'a str)> {
-        players.iter().map(|(name, role)| (name.as_str(), *role)).collect()
+        players
+            .iter()
+            .map(|(name, role)| (name.as_str(), *role))
+            .collect()
     }
     let watcher = players.len() - 1;
     h.press(&roles(22, &list(&players)), 22, watcher);
     h.press(&team_choice(23, "Watcher"), 23, 4);
     h.server(&system("§a§l» §rSet §eWatcher's§r role to §bSpectator"));
     players[watcher].1 = "Spectator";
-    assert!(h.close(&roles(24, &list(&players)), 24).said("aren't finished"));
+    assert!(
+        h.close(&roles(24, &list(&players)), 24)
+            .said("aren't finished")
+    );
     h.press(&game_settings(25), 25, 5);
     h.close(&manage(26), 26);
 
@@ -1509,7 +1962,13 @@ fn a_spectator_back_to_playing_fills_the_lobby_and_the_mod_takes_over() {
     let (kept, sent) = h.server(&batch);
     assert!(!kept, "the list is the mod's");
     assert!(sent.said("Watcher is playing now"));
-    assert!(sent.said(&format!("{FULL_LOBBY}/{FULL_LOBBY} players are in. Setting the teams now")), "{:?}", sent.said);
+    assert!(
+        sent.said(&format!(
+            "{FULL_LOBBY}/{FULL_LOBBY} players are in. Setting the teams now"
+        )),
+        "{:?}",
+        sent.said
+    );
     // Watcher is not in the party: moved to the map's team (BLUE on Temple).
     assert_eq!(sent.answers, vec![(31, Some(format!("{watcher}\n")))]);
     h.press(&team_choice(32, "Watcher"), 32, 1);
@@ -1538,13 +1997,20 @@ mod batch_rewrite {
     }
 
     fn ids(batch: &[u8]) -> Vec<u32> {
-        split_batch(batch).unwrap().iter().map(|packet| packet.id).collect()
+        split_batch(batch)
+            .unwrap()
+            .iter()
+            .map(|packet| packet.id)
+            .collect()
     }
 
     #[test]
     fn an_unchanged_batch_is_not_rebuilt() {
         let batch = three();
-        assert_eq!(rewrite(&split_batch(&batch).unwrap(), batch.len(), |_| None), None);
+        assert_eq!(
+            rewrite(&split_batch(&batch).unwrap(), batch.len(), |_| None),
+            None
+        );
     }
 
     #[test]
@@ -1562,7 +2028,9 @@ mod batch_rewrite {
         });
         assert_eq!(ids(&out.unwrap()), [2, 9]);
         // A change in the middle keeps the packets before it.
-        let out = rewrite(&packets, batch.len(), |packet| (packet.id == 2).then_some(None));
+        let out = rewrite(&packets, batch.len(), |packet| {
+            (packet.id == 2).then_some(None)
+        });
         assert_eq!(ids(&out.unwrap()), [1, 3]);
     }
 }
@@ -1574,12 +2042,17 @@ mod change_map {
 
     /// Hive's Map menu with Rome added (YELLOW faces RED there), Temple selected.
     fn hive_maps(form: u32) -> Vec<u8> {
-        menu(form, "Map", "This menu allows you to select any available map.", &[
-            ("Random", "Select to equip"),
-            ("Autumn", "Select to equip"),
-            ("Rome", "Select to equip"),
-            ("Temple", "» Selected «"),
-        ])
+        menu(
+            form,
+            "Map",
+            "This menu allows you to select any available map.",
+            &[
+                ("Random", "Select to equip"),
+                ("Autumn", "Select to equip"),
+                ("Rome", "Select to equip"),
+                ("Temple", "» Selected «"),
+            ],
+        )
     }
 
     /// Opens Hive's Map menu by hand; returns the mod's menu in its place.
@@ -1641,15 +2114,28 @@ mod change_map {
     fn teams_on_temple(h: &mut Harness) -> Vec<(String, String)> {
         h.join_lobby("Party: Boldworks, H0nri");
         h.preset_and_map();
-        for (joined, name) in (2..=FULL_LOBBY).zip(["Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]) {
-            h.server(&system(&format!("§a§l» §r§7{name} joined. §8[{joined}/16]")));
+        for (joined, name) in
+            (2..=FULL_LOBBY).zip(["Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"])
+        {
+            h.server(&system(&format!(
+                "§a§l» §r§7{name} joined. §8[{joined}/16]"
+            )));
         }
         h.press(&manage(20), 20, 0);
         h.press(&game_settings(21), 21, 2);
-        let mut players: Vec<(String, String)> = ["Boldworks", "Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]
-            .iter()
-            .map(|name| (name.to_string(), "Player".to_owned()))
-            .collect();
+        let mut players: Vec<(String, String)> = [
+            "Boldworks",
+            "Charlie",
+            "H0nri",
+            "P2",
+            "P3",
+            "P4",
+            "P5",
+            "P6",
+        ]
+        .iter()
+        .map(|name| (name.to_string(), "Player".to_owned()))
+        .collect();
         let (_, next) = h.set_roles(22, &mut players);
         assert_eq!(players[1].1, "BLUE");
         h.press(&game_settings(next), next, 5);
@@ -1670,8 +2156,17 @@ mod change_map {
         h.press(&game_settings(61), 61, 2);
         let (sent, next) = h.set_roles(62, &mut players);
         let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
-        assert_eq!(teams, ["RED", "YELLOW", "RED", "YELLOW", "YELLOW", "YELLOW", "YELLOW", "YELLOW"]);
-        assert!(sent.said("RED Boldworks, H0nri | YELLOW Charlie"), "{:?}", sent.said);
+        assert_eq!(
+            teams,
+            [
+                "RED", "YELLOW", "RED", "YELLOW", "YELLOW", "YELLOW", "YELLOW", "YELLOW"
+            ]
+        );
+        assert!(
+            sent.said("RED Boldworks, H0nri | YELLOW Charlie"),
+            "{:?}",
+            sent.said
+        );
         h.press(&game_settings(next), next, 5);
         h.close(&manage(next + 1), next + 1);
         assert!(h.server(&manage(next + 2)).0);
@@ -1684,8 +2179,17 @@ mod change_map {
         let buttons = open(&mut h, 60);
         // Autumn faces BLUE like Temple: nothing to move, and Game Settings is the player's.
         let sent = pick(&mut h, &buttons, "Autumn");
-        assert_eq!(sent.answers, vec![(60, Some("1
-".into()))]);
+        assert_eq!(
+            sent.answers,
+            vec![(
+                60,
+                Some(
+                    "1
+"
+                    .into()
+                )
+            )]
+        );
         assert!(!sent.said("Setting the teams again"), "{:?}", sent.said);
         assert!(h.server(&game_settings(61)).0);
     }

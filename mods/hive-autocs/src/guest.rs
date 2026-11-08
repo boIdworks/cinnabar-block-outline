@@ -87,31 +87,31 @@ impl Guest for Mod {
         };
         Ok(with(|session| {
             let Some(packets) = split_batch(&batch) else {
-                session.recorder.note(format!("unreadable {way:?} batch of {} bytes", batch.len()));
+                session
+                    .recorder
+                    .note(format!("unreadable {way:?} batch of {} bytes", batch.len()));
                 flush(session);
                 return None;
             };
             session.recorder.batch(way, &packets);
-            let replaced = rewrite(&packets, batch.len(), |packet| {
-                match way {
-                    Way::FromServer if session.auto.from_server(packet) => Some(None),
-                    Way::FromClient if session.auto.from_client(packet) => Some(None),
-                    Way::FromServer if packet.id == commands::AVAILABLE_COMMANDS => {
-                        match commands::with_autocs(packet.bytes) {
-                            Some(rewritten) => {
-                                session.recorder.note("added /autocs to the command list");
-                                Some(Some(rewritten))
-                            }
-                            None => {
-                                session.recorder.note(
-                                    "command list left as sent (unreadable or already has /autocs)",
-                                );
-                                None
-                            }
+            let replaced = rewrite(&packets, batch.len(), |packet| match way {
+                Way::FromServer if session.auto.from_server(packet) => Some(None),
+                Way::FromClient if session.auto.from_client(packet) => Some(None),
+                Way::FromServer if packet.id == commands::AVAILABLE_COMMANDS => {
+                    match commands::with_autocs(packet.bytes) {
+                        Some(rewritten) => {
+                            session.recorder.note("added /autocs to the command list");
+                            Some(Some(rewritten))
+                        }
+                        None => {
+                            session.recorder.note(
+                                "command list left as sent (unreadable or already has /autocs)",
+                            );
+                            None
                         }
                     }
-                    _ => None,
                 }
+                _ => None,
             });
             flush(session);
             replaced
@@ -139,7 +139,9 @@ impl Guest for Mod {
     fn stop() {
         with(|session| {
             let packets = session.recorder.packets();
-            session.recorder.note(format!("session end after {packets} packets"));
+            session
+                .recorder
+                .note(format!("session end after {packets} packets"));
             flush(session);
         });
     }

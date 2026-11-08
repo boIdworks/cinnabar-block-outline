@@ -38,16 +38,31 @@ pub fn read_text(packet: &Packet<'_>) -> Option<Text> {
     let shape = body.var_u32()?;
     let kind = body.u8()?;
     Some(match shape {
-        0 => Text { kind, author: None, message: body.string()?, params: Vec::new() },
+        0 => Text {
+            kind,
+            author: None,
+            message: body.string()?,
+            params: Vec::new(),
+        },
         1 => {
             let author = body.string()?;
-            Text { kind, author: Some(author), message: body.string()?, params: Vec::new() }
+            Text {
+                kind,
+                author: Some(author),
+                message: body.string()?,
+                params: Vec::new(),
+            }
         }
         2 => {
             let message = body.string()?;
             let count = body.var_u32()?.min(16);
             let params = (0..count).map(|_| body.string()).collect::<Option<_>>()?;
-            Text { kind, author: None, message, params }
+            Text {
+                kind,
+                author: None,
+                message,
+                params,
+            }
         }
         _ => return None,
     })
@@ -63,7 +78,11 @@ pub fn read_form_request(packet: &Packet<'_>) -> Option<(u32, String)> {
 pub fn read_form_response(packet: &Packet<'_>) -> Option<(u32, Option<String>, Option<u8>)> {
     let mut body = packet.body();
     let form = body.var_u32()?;
-    let response = if body.bool()? { Some(body.string()?) } else { None };
+    let response = if body.bool()? {
+        Some(body.string()?)
+    } else {
+        None
+    };
     let reason = if body.bool()? { Some(body.u8()?) } else { None };
     Some((form, response, reason))
 }
@@ -78,7 +97,11 @@ pub fn read_show_screen(packet: &Packet<'_>) -> Option<(String, u32, Option<u32>
     let mut body = packet.body();
     let screen = body.string()?;
     let form = body.u32_le()?;
-    let data = if body.bool()? { Some(body.u32_le()?) } else { None };
+    let data = if body.bool()? {
+        Some(body.u32_le()?)
+    } else {
+        None
+    };
     Some((screen, form, data))
 }
 
@@ -171,7 +194,11 @@ pub fn strings(bytes: &[u8]) -> Vec<String> {
 }
 
 pub fn hex(bytes: &[u8], limit: usize) -> String {
-    let mut out: String = bytes.iter().take(limit).map(|byte| format!("{byte:02x}")).collect();
+    let mut out: String = bytes
+        .iter()
+        .take(limit)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     if bytes.len() > limit {
         out.push_str(&format!("..(+{} bytes)", bytes.len() - limit));
     }

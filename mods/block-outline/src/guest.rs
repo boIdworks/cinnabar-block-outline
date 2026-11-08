@@ -24,8 +24,8 @@ use mod_api::drawing::{self, api as draw, shapes};
 
 use crate::counter::{self, Quiver};
 use crate::cps;
-use crate::fps;
 use crate::crosshair;
+use crate::fps;
 use crate::hudedit;
 use crate::jumpreset;
 use crate::outline::{self, Cell, Hit, KeyName, Settings};

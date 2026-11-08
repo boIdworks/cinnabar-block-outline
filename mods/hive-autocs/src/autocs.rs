@@ -48,54 +48,182 @@ pub const PICKER_FORM: u32 = 2_000_000_001;
 /// The Squads maps Hive offered when the menus were recorded (2026-11-05); the menu uses the
 /// live list once Hive has shown it this session.
 pub const MAPS: [&str; 29] = [
-    "Random", "Autumn", "Cobalt", "Coven (Halloween)", "Cyberspace", "Gingerbread (Winterfest)",
-    "Grove", "Hanging Gardens", "Hanging Gardens (Spring)", "Jotunheim", "Lumora",
-    "Monster Labs (Halloween)", "O2", "Orion", "Pirates", "Prisma", "Quantum", "Railway", "Rome",
-    "Ruins", "Serrano", "Soul's End", "Spring (Spring)", "Summer (Summer)", "Summer Coast",
-    "Temple", "Tesla Labs", "Tropical", "Winter (Winterfest)",
+    "Random",
+    "Autumn",
+    "Cobalt",
+    "Coven (Halloween)",
+    "Cyberspace",
+    "Gingerbread (Winterfest)",
+    "Grove",
+    "Hanging Gardens",
+    "Hanging Gardens (Spring)",
+    "Jotunheim",
+    "Lumora",
+    "Monster Labs (Halloween)",
+    "O2",
+    "Orion",
+    "Pirates",
+    "Prisma",
+    "Quantum",
+    "Railway",
+    "Rome",
+    "Ruins",
+    "Serrano",
+    "Soul's End",
+    "Spring (Spring)",
+    "Summer (Summer)",
+    "Summer Coast",
+    "Temple",
+    "Tesla Labs",
+    "Tropical",
+    "Winter (Winterfest)",
 ];
 
 /// The map menu's order, top to bottom, as the player listed it (2026-11-06): most likely
 /// played first. Names may leave out the event tag ("Spring" for "Spring (Spring)"). Random
 /// comes before them, and maps not listed (Railway) after them in Hive's order.
 pub const RANKING: &[&str] = &[
-    "Temple", "Rome", "Ruins", "Spring", "Summer", "Autumn", "Winter", "Pirates", "Hanging Gardens",
-    "Hanging Gardens (Spring)", "Tropical", "Cyberspace", "Prisma", "Soul's End", "Gingerbread",
-    "Grove", "O2", "Cobalt", "Jotunheim", "Coven", "Summer Coast", "Serrano", "Lumora",
-    "Tesla Labs", "Monster Labs", "Orion", "Quantum",
+    "Temple",
+    "Rome",
+    "Ruins",
+    "Spring",
+    "Summer",
+    "Autumn",
+    "Winter",
+    "Pirates",
+    "Hanging Gardens",
+    "Hanging Gardens (Spring)",
+    "Tropical",
+    "Cyberspace",
+    "Prisma",
+    "Soul's End",
+    "Gingerbread",
+    "Grove",
+    "O2",
+    "Cobalt",
+    "Jotunheim",
+    "Coven",
+    "Summer Coast",
+    "Serrano",
+    "Lumora",
+    "Tesla Labs",
+    "Monster Labs",
+    "Orion",
+    "Quantum",
 ];
 
 /// Hive's picture for each map, as its Map menu showed them on 2026-11-05; the menu uses the
 /// live pictures once Hive has shown them this session.
 const IMAGES: [(&str, &str); 28] = [
-    ("Autumn", "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.png"),
-    ("Cobalt", "https://cdn.playhive.com//icons/map/BED_SQUAD_Cobalt.png"),
-    ("Coven (Halloween)", "https://cdn.playhive.com//icons/map/BED_SQUAD_Coven.halloween.png"),
-    ("Cyberspace", "https://cdn.playhive.com//icons/map/BED_SQUAD_Cyberspace.png"),
-    ("Gingerbread (Winterfest)", "https://cdn.playhive.com//icons/map/BED_SQUAD_Gingerbread.winterfest.png"),
-    ("Grove", "https://cdn.playhive.com//icons/map/BED_SQUAD_Grove.png"),
-    ("Hanging Gardens", "https://cdn.playhive.com//icons/map/BED_SQUAD_HangingGardens.png"),
-    ("Hanging Gardens (Spring)", "https://cdn.playhive.com//icons/map/BED_SQUAD_HangingGardens.spring.png"),
-    ("Jotunheim", "https://cdn.playhive.com//icons/map/BED_SQUAD_Jotunheim.png"),
-    ("Lumora", "https://cdn.playhive.com//icons/map/BED_SQUAD_Lumora.png"),
-    ("Monster Labs (Halloween)", "https://cdn.playhive.com//icons/map/BED_SQUAD_TeslaLabs.halloween.png"),
+    (
+        "Autumn",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.png",
+    ),
+    (
+        "Cobalt",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Cobalt.png",
+    ),
+    (
+        "Coven (Halloween)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Coven.halloween.png",
+    ),
+    (
+        "Cyberspace",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Cyberspace.png",
+    ),
+    (
+        "Gingerbread (Winterfest)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Gingerbread.winterfest.png",
+    ),
+    (
+        "Grove",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Grove.png",
+    ),
+    (
+        "Hanging Gardens",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_HangingGardens.png",
+    ),
+    (
+        "Hanging Gardens (Spring)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_HangingGardens.spring.png",
+    ),
+    (
+        "Jotunheim",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Jotunheim.png",
+    ),
+    (
+        "Lumora",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Lumora.png",
+    ),
+    (
+        "Monster Labs (Halloween)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_TeslaLabs.halloween.png",
+    ),
     ("O2", "https://cdn.playhive.com//icons/map/BED_SQUAD_O2.png"),
-    ("Orion", "https://cdn.playhive.com//icons/map/BED_SQUAD_Orion.png"),
-    ("Pirates", "https://cdn.playhive.com//icons/map/BED_SQUAD_Pirates.png"),
-    ("Prisma", "https://cdn.playhive.com//icons/map/BED_SQUAD_Prisma.png"),
-    ("Quantum", "https://cdn.playhive.com//icons/map/BED_SQUAD_Quantum.png"),
-    ("Railway", "https://cdn.playhive.com//icons/map/BED_SQUAD_Railway.png"),
-    ("Rome", "https://cdn.playhive.com//icons/map/BED_SQUAD_Rome.png"),
-    ("Ruins", "https://cdn.playhive.com//icons/map/BED_SQUAD_Ruins.png"),
-    ("Serrano", "https://cdn.playhive.com//icons/map/BED_SQUAD_Serrano.png"),
-    ("Soul's End", "https://cdn.playhive.com//icons/map/BED_SQUAD_SoulsEnd.png"),
-    ("Spring (Spring)", "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.spring.png"),
-    ("Summer (Summer)", "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.summer.png"),
-    ("Summer Coast", "https://cdn.playhive.com//icons/map/BED_SQUAD_SummerCoast.png"),
-    ("Temple", "https://cdn.playhive.com//icons/map/BED_SQUAD_Temple.png"),
-    ("Tesla Labs", "https://cdn.playhive.com//icons/map/BED_SQUAD_TeslaLabs.png"),
-    ("Tropical", "https://cdn.playhive.com//icons/map/BED_SQUAD_Tropical.png"),
-    ("Winter (Winterfest)", "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.winterfest.png"),
+    (
+        "Orion",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Orion.png",
+    ),
+    (
+        "Pirates",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Pirates.png",
+    ),
+    (
+        "Prisma",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Prisma.png",
+    ),
+    (
+        "Quantum",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Quantum.png",
+    ),
+    (
+        "Railway",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Railway.png",
+    ),
+    (
+        "Rome",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Rome.png",
+    ),
+    (
+        "Ruins",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Ruins.png",
+    ),
+    (
+        "Serrano",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Serrano.png",
+    ),
+    (
+        "Soul's End",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_SoulsEnd.png",
+    ),
+    (
+        "Spring (Spring)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.spring.png",
+    ),
+    (
+        "Summer (Summer)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.summer.png",
+    ),
+    (
+        "Summer Coast",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_SummerCoast.png",
+    ),
+    (
+        "Temple",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Temple.png",
+    ),
+    (
+        "Tesla Labs",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_TeslaLabs.png",
+    ),
+    (
+        "Tropical",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Tropical.png",
+    ),
+    (
+        "Winter (Winterfest)",
+        "https://cdn.playhive.com//icons/map/BED_SQUAD_Autumn.winterfest.png",
+    ),
 ];
 
 /// The team facing RED on each map, by its name without the event tag ("Coven" for "Coven
@@ -105,16 +233,33 @@ const IMAGES: [(&str, &str); 28] = [
 /// players to a team the map lacks. Maps not listed, and Random, are the same, without a menu
 /// group.
 const OPPONENTS: [(&str, &str, bool); 27] = [
-    ("Autumn", "BLUE", true), ("Lumora", "BLUE", true), ("Pirates", "BLUE", true),
-    ("Prisma", "BLUE", true), ("Soul's End", "BLUE", true), ("Spring", "BLUE", true),
-    ("Summer", "BLUE", true), ("Temple", "BLUE", true), ("Winter", "BLUE", true),
-    ("Cobalt", "BLUE", true), ("Orion", "BLUE", true), ("Quantum", "BLUE", true),
+    ("Autumn", "BLUE", true),
+    ("Lumora", "BLUE", true),
+    ("Pirates", "BLUE", true),
+    ("Prisma", "BLUE", true),
+    ("Soul's End", "BLUE", true),
+    ("Spring", "BLUE", true),
+    ("Summer", "BLUE", true),
+    ("Temple", "BLUE", true),
+    ("Winter", "BLUE", true),
+    ("Cobalt", "BLUE", true),
+    ("Orion", "BLUE", true),
+    ("Quantum", "BLUE", true),
     ("Serrano", "BLUE", true),
-    ("Cyberspace", "YELLOW", true), ("Hanging Gardens", "YELLOW", true), ("Rome", "YELLOW", true),
-    ("Ruins", "YELLOW", true), ("O2", "YELLOW", true), ("Tropical", "YELLOW", true),
-    ("Coven", "GREEN", true), ("Gingerbread", "GREEN", true), ("Grove", "GREEN", true),
-    ("Summer Coast", "GREEN", true), ("Jotunheim", "GREEN", true), ("Monster Labs", "GREEN", true),
-    ("Tesla Labs", "GREEN", true), ("Railway", "GREEN", true),
+    ("Cyberspace", "YELLOW", true),
+    ("Hanging Gardens", "YELLOW", true),
+    ("Rome", "YELLOW", true),
+    ("Ruins", "YELLOW", true),
+    ("O2", "YELLOW", true),
+    ("Tropical", "YELLOW", true),
+    ("Coven", "GREEN", true),
+    ("Gingerbread", "GREEN", true),
+    ("Grove", "GREEN", true),
+    ("Summer Coast", "GREEN", true),
+    ("Jotunheim", "GREEN", true),
+    ("Monster Labs", "GREEN", true),
+    ("Tesla Labs", "GREEN", true),
+    ("Railway", "GREEN", true),
 ];
 
 /// The team facing RED on `map` and whether that is confirmed, if it is listed.
@@ -124,7 +269,9 @@ pub fn pairing(map: &str) -> Option<(&'static str, bool)> {
 
 /// The confirmed team facing RED on `map`: the team the mod moves everyone else to.
 pub fn opponent(map: &str) -> Option<&'static str> {
-    pairing(map).filter(|(_, confirmed)| *confirmed).map(|(team, _)| team)
+    pairing(map)
+        .filter(|(_, confirmed)| *confirmed)
+        .map(|(team, _)| team)
 }
 
 /// A map's name without its event tag: "Spring" for "Spring (Spring)".
@@ -142,7 +289,10 @@ fn lookup<'a, T>(list: &'a [T], map: &str, name: impl Fn(&T) -> &str) -> Option<
 
 /// Where [`lookup`] finds `map` in `list`.
 fn position<T>(list: &[T], map: &str, name: impl Fn(&T) -> &str) -> Option<usize> {
-    let find = |wanted: &str| list.iter().position(|entry| slug(name(entry)) == slug(wanted));
+    let find = |wanted: &str| {
+        list.iter()
+            .position(|entry| slug(name(entry)) == slug(wanted))
+    };
     find(map).or_else(|| find(base(map)))
 }
 
@@ -290,7 +440,10 @@ impl AutoCs {
             invites: Vec::new(),
             specs: Vec::new(),
             maps: MAPS.iter().map(|map| map.to_string()).collect(),
-            images: IMAGES.iter().map(|(map, url)| (map.to_string(), url.to_string())).collect(),
+            images: IMAGES
+                .iter()
+                .map(|(map, url)| (map.to_string(), url.to_string()))
+                .collect(),
             changing: None,
             answers: Vec::new(),
             to_client: Vec::new(),
@@ -354,7 +507,10 @@ impl AutoCs {
     }
 
     fn autocs(&mut self, argument: &str) {
-        if ["stop", "cancel"].iter().any(|stop| argument.eq_ignore_ascii_case(stop)) {
+        if ["stop", "cancel"]
+            .iter()
+            .any(|stop| argument.eq_ignore_ascii_case(stop))
+        {
             if self.run.stage == Stage::Idle {
                 self.say("Nothing to stop.");
             } else {
@@ -416,7 +572,10 @@ impl AutoCs {
 
     /// Starts a run for `map`: the party command first, then the server.
     fn begin(&mut self, map: String) {
-        self.notes.push(format!("AUTOCS start map={map:?} invites={:?}", self.invites));
+        self.notes.push(format!(
+            "AUTOCS start map={map:?} invites={:?}",
+            self.invites
+        ));
         self.say(&format!("Map §b{map}§r. Checking your party..."));
         self.run.to_invite = self.invites.clone();
         self.run.map = map;
@@ -442,7 +601,8 @@ impl AutoCs {
         self.run.to_invite.clear();
         self.run.requested.clear();
         self.run.spec_pending = false;
-        self.notes.push(format!("AUTOCS end invites={names:?} specs={specs:?}"));
+        self.notes
+            .push(format!("AUTOCS end invites={names:?} specs={specs:?}"));
         let mut parts = Vec::new();
         if !names.is_empty() {
             parts.push(format!("I won't invite §e{}§r again", names.join(", ")));
@@ -453,7 +613,10 @@ impl AutoCs {
         if parts.is_empty() {
             self.say("Game over. Nothing to forget; the next game starts fresh.");
         } else {
-            self.say(&format!("Game over. {}; the next game starts fresh.", parts.join(", and ")));
+            self.say(&format!(
+                "Game over. {}; the next game starts fresh.",
+                parts.join(", and ")
+            ));
         }
     }
 
@@ -465,7 +628,12 @@ impl AutoCs {
         }
         self.notes.push(format!("AUTOCS spectate {player:?}"));
         self.remember_spec(player);
-        if !self.run.requested.iter().any(|known| known.eq_ignore_ascii_case(player)) {
+        if !self
+            .run
+            .requested
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(player))
+        {
             self.run.requested.push(player.to_owned());
         }
         self.run.spec_pending = true;
@@ -474,20 +642,30 @@ impl AutoCs {
             self.run.stage = Stage::Lobby;
         }
         if self.run.stage == Stage::Lobby {
-            self.say(&format!("§eRight-click the settings item§r to make §e{player}§r a spectator."));
+            self.say(&format!(
+                "§eRight-click the settings item§r to make §e{player}§r a spectator."
+            ));
         } else {
-            self.say(&format!("I'll make §e{player}§r a spectator once you're in the server."));
+            self.say(&format!(
+                "I'll make §e{player}§r a spectator once you're in the server."
+            ));
         }
     }
 
     fn remember_spec(&mut self, player: &str) {
-        if !self.specs.iter().any(|known| known.eq_ignore_ascii_case(player)) {
+        if !self
+            .specs
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(player))
+        {
             self.specs.push(player.to_owned());
         }
     }
 
     fn is_spec(&self, player: &str) -> bool {
-        self.specs.iter().any(|spec| spec.eq_ignore_ascii_case(player))
+        self.specs
+            .iter()
+            .any(|spec| spec.eq_ignore_ascii_case(player))
     }
 
     fn teams(&mut self) {
@@ -525,14 +703,24 @@ impl AutoCs {
         }
         let plain = strip(&text.message);
         if let Some((by, name)) = invite_sent(&plain) {
-            let by_mod = self.run.invited.iter().any(|known| known.eq_ignore_ascii_case(name));
+            let by_mod = self
+                .run
+                .invited
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(name));
             if !by_mod
                 && !name.eq_ignore_ascii_case(&self.me)
-                && !self.invites.iter().any(|known| known.eq_ignore_ascii_case(name))
+                && !self
+                    .invites
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(name))
             {
                 self.invites.push(name.to_owned());
-                let from = by.map(|by| format!(" (invited by §e{by}§r)")).unwrap_or_default();
-                self.notes.push(format!("AUTOCS remember invite {name:?} by={by:?}"));
+                let from = by
+                    .map(|by| format!(" (invited by §e{by}§r)"))
+                    .unwrap_or_default();
+                self.notes
+                    .push(format!("AUTOCS remember invite {name:?} by={by:?}"));
                 self.say(&format!(
                     "I'll invite §e{name}§r{from} to your next games too (§e/autocs end§r when this group is done)."
                 ));
@@ -550,10 +738,17 @@ impl AutoCs {
             } else if self.is_spec(name) {
                 // The mod never moves a spectator, so this was done by hand: they play now.
                 self.specs.retain(|spec| !spec.eq_ignore_ascii_case(name));
-                self.run.requested.retain(|spec| !spec.eq_ignore_ascii_case(name));
-                self.run.spectating.retain(|spec| !spec.eq_ignore_ascii_case(name));
-                self.notes.push(format!("AUTOCS forget spec {name:?} role={role:?}"));
-                self.say(&format!("§e{name}§r is playing now; I won't make them a spectator again."));
+                self.run
+                    .requested
+                    .retain(|spec| !spec.eq_ignore_ascii_case(name));
+                self.run
+                    .spectating
+                    .retain(|spec| !spec.eq_ignore_ascii_case(name));
+                self.notes
+                    .push(format!("AUTOCS forget spec {name:?} role={role:?}"));
+                self.say(&format!(
+                    "§e{name}§r is playing now; I won't make them a spectator again."
+                ));
                 self.player_back();
             }
         }
@@ -584,17 +779,35 @@ impl AutoCs {
                     "You're in! §eRight-click the settings item§r and I'll load the preset, set the map{invites}."
                 ));
             }
-            if let Some(name) = plain.split_once(" joined.").map(|(before, _)| player_name(before)) {
-                if !self.run.present.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+            if let Some(name) = plain
+                .split_once(" joined.")
+                .map(|(before, _)| player_name(before))
+            {
+                if !self
+                    .run
+                    .present
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(name))
+                {
                     self.run.present.push(name.to_owned());
                 }
-                if self.run.stage == Stage::Lobby && self.is_spec(name) && !name.eq_ignore_ascii_case(&self.me) {
+                if self.run.stage == Stage::Lobby
+                    && self.is_spec(name)
+                    && !name.eq_ignore_ascii_case(&self.me)
+                {
                     self.say(&format!("§e{name}§r will spectate, as in your last game."));
                 }
             }
-            if let Some(name) = plain.split_once(" left.").map(|(before, _)| player_name(before)) {
-                self.run.present.retain(|known| !known.eq_ignore_ascii_case(name));
-                self.run.spectating.retain(|spec| !spec.eq_ignore_ascii_case(name));
+            if let Some(name) = plain
+                .split_once(" left.")
+                .map(|(before, _)| player_name(before))
+            {
+                self.run
+                    .present
+                    .retain(|known| !known.eq_ignore_ascii_case(name));
+                self.run
+                    .spectating
+                    .retain(|spec| !spec.eq_ignore_ascii_case(name));
             }
             self.lobby = count;
             self.check_full();
@@ -609,7 +822,12 @@ impl AutoCs {
     /// Spectators in the server: those Hive shows as Spectator, and remembered spectators who
     /// joined and will be set with the teams.
     fn spectators(&self) -> u32 {
-        let mut names: Vec<String> = self.run.spectating.iter().map(|name| name.to_lowercase()).collect();
+        let mut names: Vec<String> = self
+            .run
+            .spectating
+            .iter()
+            .map(|name| name.to_lowercase())
+            .collect();
         for name in &self.run.present {
             if self.is_spec(name) && !name.eq_ignore_ascii_case(&self.me) {
                 names.push(name.to_lowercase());
@@ -645,7 +863,8 @@ impl AutoCs {
         self.run.roles_ready = true;
         self.run.roles_prompted = true;
         self.run.closing_until = Some(self.tick + PARENT_TICKS);
-        self.notes.push("AUTOCS lobby full after a spectator came back; setting the teams".into());
+        self.notes
+            .push("AUTOCS lobby full after a spectator came back; setting the teams".into());
         self.say(&format!(
             "{}. Setting the teams now: your party §cRED§r, {} (if the menu closed, §eright-click the settings item§r).",
             self.lobby_text(),
@@ -706,7 +925,10 @@ impl AutoCs {
         if menu.title == "Map"
             && !self.run.navigating
             && matches!(self.run.stage, Stage::Idle | Stage::Lobby)
-            && menu.buttons.iter().any(|button| position(&MAPS, &button.first, |map| map).is_some())
+            && menu
+                .buttons
+                .iter()
+                .any(|button| position(&MAPS, &button.first, |map| map).is_some())
         {
             return self.change_map(form, &menu);
         }
@@ -745,7 +967,10 @@ impl AutoCs {
                 true
             }
             None => {
-                self.fail(&format!("Hive showed §e{}§r, which I didn't expect. It's yours now.", menu.title));
+                self.fail(&format!(
+                    "Hive showed §e{}§r, which I didn't expect. It's yours now.",
+                    menu.title
+                ));
                 false
             }
         }
@@ -764,7 +989,11 @@ impl AutoCs {
             || invites
             || access
             || start;
-        let parent = self.run.closing_until.take().is_some_and(|until| self.tick <= until);
+        let parent = self
+            .run
+            .closing_until
+            .take()
+            .is_some_and(|until| self.tick <= until);
         if !self.run.navigating {
             if !parent && (menu.title != "Manage Your Server" || !work) {
                 return false;
@@ -811,13 +1040,16 @@ impl AutoCs {
                 } else {
                     if self.run.preset == Task::Pending {
                         self.run.preset = Task::Failed;
-                        self.say(&format!("No saved preset called §e{PRESET}§r; skipping it."));
+                        self.say(&format!(
+                            "No saved preset called §e{PRESET}§r; skipping it."
+                        ));
                     }
                     menu.button("Go Back")
                 }
             }
             "Load Preset?" => {
-                if self.run.preset == Task::Pending && menu.content.to_lowercase().contains(PRESET) {
+                if self.run.preset == Task::Pending && menu.content.to_lowercase().contains(PRESET)
+                {
                     self.run.preset = Task::Done;
                     self.notes.push("AUTOCS preset loaded".into());
                     menu.button("Confirm")
@@ -844,10 +1076,17 @@ impl AutoCs {
                 }
             }
             title if title.to_lowercase().contains("access mode") => {
-                let open = if access { menu.button_with(&OPEN_WORDS, &NOT_OPEN_WORDS) } else { None };
+                let open = if access {
+                    menu.button_with(&OPEN_WORDS, &NOT_OPEN_WORDS)
+                } else {
+                    None
+                };
                 if let Some(index) = open {
                     self.run.access = Task::Done;
-                    self.notes.push(format!("AUTOCS access mode {:?}", menu.buttons[index].first));
+                    self.notes.push(format!(
+                        "AUTOCS access mode {:?}",
+                        menu.buttons[index].first
+                    ));
                     Some(index)
                 } else {
                     if access {
@@ -869,25 +1108,35 @@ impl AutoCs {
                 None => return self.finish(form, true),
             },
             "Invite Player" => {
-                if invites { menu.button("Invite Username") } else { menu.button("Go Back") }
+                if invites {
+                    menu.button("Invite Username")
+                } else {
+                    menu.button("Go Back")
+                }
             }
             "Map" => {
                 self.learn_maps(menu);
                 match menu.button(&self.run.map) {
                     Some(index) if self.run.map_task == Task::Pending => {
                         self.run.map_task = Task::Done;
-                        self.notes.push(format!("AUTOCS map set {:?}", self.run.map));
+                        self.notes
+                            .push(format!("AUTOCS map set {:?}", self.run.map));
                         Some(index)
                     }
                     _ => {
                         self.run.map_task = Task::Failed;
-                        self.say(&format!("Hive has no map called §e{}§r now; pick it by hand.", self.run.map));
+                        self.say(&format!(
+                            "Hive has no map called §e{}§r now; pick it by hand.",
+                            self.run.map
+                        ));
                         return self.finish(form, true);
                     }
                 }
             }
             "Set Roles" if menu.content.starts_with("Setting role for ") => {
-                let player = menu.content["Setting role for ".len()..].trim().trim_end_matches('.');
+                let player = menu.content["Setting role for ".len()..]
+                    .trim()
+                    .trim_end_matches('.');
                 // Players the mod leaves to Hive are never opened, but be safe: unassign.
                 let role = self.role_of(player).unwrap_or("Player");
                 menu.button(role)
@@ -907,7 +1156,11 @@ impl AutoCs {
                     }
                     if self.teams_now() {
                         let players = menu.buttons.len() as u32 - self.run.spectating.len() as u32;
-                        self.run.present = menu.buttons.iter().map(|button| button.first.clone()).collect();
+                        self.run.present = menu
+                            .buttons
+                            .iter()
+                            .map(|button| button.first.clone())
+                            .collect();
                         if players == FULL_LOBBY {
                             self.run.roles = Task::Done;
                             self.report_teams(menu);
@@ -942,7 +1195,10 @@ impl AutoCs {
             }
             None => {
                 self.run.navigating = false;
-                self.say(&format!("Couldn't find the right button in §e{}§r; it's yours.", menu.title));
+                self.say(&format!(
+                    "Couldn't find the right button in §e{}§r; it's yours.",
+                    menu.title
+                ));
                 false
             }
         }
@@ -950,7 +1206,11 @@ impl AutoCs {
 
     /// Keeps Hive's live map list and pictures from its Map menu.
     fn learn_maps(&mut self, menu: &Menu) {
-        self.maps = menu.buttons.iter().map(|button| button.first.clone()).collect();
+        self.maps = menu
+            .buttons
+            .iter()
+            .map(|button| button.first.clone())
+            .collect();
         for button in &menu.buttons {
             if let Some(url) = &button.image {
                 match self.images.iter_mut().find(|(map, _)| *map == button.first) {
@@ -972,7 +1232,8 @@ impl AutoCs {
             .iter()
             .find(|button| button.second.to_lowercase().contains("selected"))
             .map(|button| button.first.clone());
-        self.notes.push(format!("AUTOCS change map from={current:?}"));
+        self.notes
+            .push(format!("AUTOCS change map from={current:?}"));
         self.run.picker = menu_order(&self.maps);
         let content = match current {
             Some(map) => format!("Now: §b{map}§r. {CHANGE_TEXT}"),
@@ -995,13 +1256,16 @@ impl AutoCs {
         };
         let Some(index) = self.maps.iter().position(|known| *known == map) else {
             self.cancel(hive);
-            self.say(&format!("Hive has no map called §e{map}§r now; pick it by hand."));
+            self.say(&format!(
+                "Hive has no map called §e{map}§r now; pick it by hand."
+            ));
             return;
         };
         self.answer(hive, index);
         self.notes.push(format!("AUTOCS map changed {map:?}"));
         let in_run = !self.run.map.is_empty();
-        let new_teams = in_run && self.run.roles == Task::Done && opponent(&self.run.map) != opponent(&map);
+        let new_teams =
+            in_run && self.run.roles == Task::Done && opponent(&self.run.map) != opponent(&map);
         self.run.map = map.clone();
         if self.run.map_task == Task::Pending {
             // Set by hand before the mod got to it: keep the player's pick.
@@ -1015,9 +1279,15 @@ impl AutoCs {
             self.run.role_tries.clear();
             self.run.steps = 0;
             self.run.navigating = true;
-            self.say(&format!("Map changed to §b{map}§r. Setting the teams again: {}.", self.others()));
+            self.say(&format!(
+                "Map changed to §b{map}§r. Setting the teams again: {}.",
+                self.others()
+            ));
         } else if in_run && self.run.roles == Task::Pending {
-            self.say(&format!("Map changed to §b{map}§r. The teams will be {}.", self.others()));
+            self.say(&format!(
+                "Map changed to §b{map}§r. The teams will be {}.",
+                self.others()
+            ));
         } else {
             self.say(&format!("Map changed to §b{map}§r."));
         }
@@ -1098,7 +1368,11 @@ impl AutoCs {
 
     /// The team the player belongs on; `None` leaves them for Hive to place.
     fn team_of(&self, player: &str) -> Option<&'static str> {
-        if self.in_party(player) { Some("RED") } else { opponent(&self.run.map) }
+        if self.in_party(player) {
+            Some("RED")
+        } else {
+            opponent(&self.run.map)
+        }
     }
 
     /// The role the mod gives the player now: Spectator for `@Name spec`, their team while the
@@ -1122,12 +1396,16 @@ impl AutoCs {
                 self.run.map,
                 colour(team)
             ),
-            None => format!("everyone else placed by Hive (§b{}§r has no team pairing set)", self.run.map),
+            None => format!(
+                "everyone else placed by Hive (§b{}§r has no team pairing set)",
+                self.run.map
+            ),
         }
     }
 
     fn in_party(&self, player: &str) -> bool {
-        player.eq_ignore_ascii_case(&self.me) || contains_word(&self.run.party, &player.to_lowercase())
+        player.eq_ignore_ascii_case(&self.me)
+            || contains_word(&self.run.party, &player.to_lowercase())
     }
 
     /// The first listed player not yet on their team, counting a try for them.
@@ -1139,7 +1417,12 @@ impl AutoCs {
             if button.second.eq_ignore_ascii_case(team) {
                 continue;
             }
-            let tries = match self.run.role_tries.iter_mut().find(|(name, _)| *name == button.first) {
+            let tries = match self
+                .run
+                .role_tries
+                .iter_mut()
+                .find(|(name, _)| *name == button.first)
+            {
                 Some((_, tries)) => tries,
                 None => {
                     self.run.role_tries.push((button.first.clone(), 0));
@@ -1158,7 +1441,9 @@ impl AutoCs {
     fn report_specs(&mut self, menu: &Menu) {
         let requested = std::mem::take(&mut self.run.requested);
         let (here, missing): (Vec<String>, Vec<String>) = requested.into_iter().partition(|spec| {
-            menu.buttons.iter().any(|button| button.first.eq_ignore_ascii_case(spec))
+            menu.buttons
+                .iter()
+                .any(|button| button.first.eq_ignore_ascii_case(spec))
         });
         if !here.is_empty() {
             let verb = if here.len() == 1 { "is" } else { "are" };
@@ -1180,14 +1465,19 @@ impl AutoCs {
                 .filter(|button| button.second.eq_ignore_ascii_case(team))
                 .map(|button| button.first.as_str())
                 .collect();
-            if list.is_empty() { "-".into() } else { list.join(", ") }
+            if list.is_empty() {
+                "-".into()
+            } else {
+                list.join(", ")
+            }
         };
         let red = names("RED");
         let (other, others) = match opponent(&self.run.map) {
             Some(team) => (format!("{}{team}§r", colour(team)), names(team)),
             None => ("§7Hive places§r".to_string(), names("Player")),
         };
-        self.notes.push(format!("AUTOCS teams red={red:?} other={others:?}"));
+        self.notes
+            .push(format!("AUTOCS teams red={red:?} other={others:?}"));
         self.say(&format!("Teams: §cRED§r {red} | {other} {others}"));
     }
 
@@ -1223,13 +1513,17 @@ impl AutoCs {
             }
         }
         let now = self.tick;
-        let (due, later): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.answers).into_iter().partition(|(at, _)| *at <= now);
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.answers)
+            .into_iter()
+            .partition(|(at, _)| *at <= now);
         self.answers = later;
         for (_, batch) in due {
             self.to_server.extend(batch);
         }
-        (std::mem::take(&mut self.to_client), std::mem::take(&mut self.to_server))
+        (
+            std::mem::take(&mut self.to_client),
+            std::mem::take(&mut self.to_server),
+        )
     }
 
     /// Lines for the recorder's log.
@@ -1239,13 +1533,15 @@ impl AutoCs {
 
     /// Presses a button of a menu.
     fn answer(&mut self, form: u32, index: usize) {
-        self.notes.push(format!("AUTOCS answer form={form} button={index}"));
+        self.notes
+            .push(format!("AUTOCS answer form={form} button={index}"));
         self.reply(|batch| packets::form_response(batch, form, &format!("{index}\n")));
     }
 
     /// Answers a custom form with its JSON response.
     fn answer_with(&mut self, form: u32, response: &str) {
-        self.notes.push(format!("AUTOCS answer form={form} response={response:?}"));
+        self.notes
+            .push(format!("AUTOCS answer form={form} response={response:?}"));
         self.reply(|batch| packets::form_response(batch, form, response));
     }
 
@@ -1324,22 +1620,35 @@ impl Menu {
             })
             .unwrap_or_default();
         let text_input = value.get("type").and_then(Value::as_str) == Some("custom_form")
-            && value.get("content").and_then(Value::as_array).is_some_and(|elements| {
-                elements.iter().any(|element| element.get("type").and_then(Value::as_str) == Some("input"))
-            });
-        Self { title: text(value.get("title")), content: text(value.get("content")), buttons, text_input }
+            && value
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|elements| {
+                    elements
+                        .iter()
+                        .any(|element| element.get("type").and_then(Value::as_str) == Some("input"))
+                });
+        Self {
+            title: text(value.get("title")),
+            content: text(value.get("content")),
+            buttons,
+            text_input,
+        }
     }
 
     /// The button whose name is `name`, ignoring case.
     fn button(&self, name: &str) -> Option<usize> {
-        self.buttons.iter().position(|button| button.first.eq_ignore_ascii_case(name))
+        self.buttons
+            .iter()
+            .position(|button| button.first.eq_ignore_ascii_case(name))
     }
 
     /// The first button whose name has one of the `wanted` words and none of the `unwanted`.
     fn button_with(&self, wanted: &[&str], unwanted: &[&str]) -> Option<usize> {
         self.buttons.iter().position(|button| {
             let name = button.first.to_lowercase();
-            wanted.iter().any(|word| name.contains(word)) && !unwanted.iter().any(|word| name.contains(word))
+            wanted.iter().any(|word| name.contains(word))
+                && !unwanted.iter().any(|word| name.contains(word))
         })
     }
 }
@@ -1386,9 +1695,9 @@ fn picker_form(maps: &[String], images: &[(String, String)], content: &str) -> V
 }
 
 /// The map menu's text for a new server, and for changing the map in one.
-const NEW_SERVER_TEXT: &str =
-    "Pick the map for your BedWars Squads custom server. Your party plays §cRED§r; each map shows the team you face.";
-const CHANGE_TEXT: &str = "Pick the new map. Your party plays §cRED§r; each map shows the team you face.";
+const NEW_SERVER_TEXT: &str = "Pick the map for your BedWars Squads custom server. Your party plays §cRED§r; each map shows the team you face.";
+const CHANGE_TEXT: &str =
+    "Pick the new map. Your party plays §cRED§r; each map shows the team you face.";
 
 /// Removes Minecraft formatting codes (`§` and the character after it).
 pub fn strip(text: &str) -> String {
@@ -1460,7 +1769,9 @@ fn word<'a>(line: &'a str, name: &str) -> Option<&'a str> {
 fn autocs_command(line: &str) -> Option<&str> {
     let end = line.find(char::is_whitespace).unwrap_or(line.len());
     let (name, rest) = line.split_at(end);
-    name.get(..4).is_some_and(|head| head.eq_ignore_ascii_case("auto")).then_some(rest)
+    name.get(..4)
+        .is_some_and(|head| head.eq_ignore_ascii_case("auto"))
+        .then_some(rest)
 }
 
 /// Whether `text` holds `name` with no letter, digit or underscore on either side.

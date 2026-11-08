@@ -98,7 +98,10 @@ pub fn split_batch(batch: &[u8]) -> Option<Vec<Packet<'_>>> {
         let length = reader.var_u32()? as usize;
         let bytes = reader.take(length)?;
         let header = Reader::new(bytes).var_u32()?;
-        packets.push(Packet { id: header & ID_MASK, bytes });
+        packets.push(Packet {
+            id: header & ID_MASK,
+            bytes,
+        });
     }
     Some(packets)
 }

@@ -23,7 +23,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         "description",
         b"Type !autocs on The Hive: creates a BedWars Squads custom server, loads your preset, sets the map and puts your party on RED, everyone else on BLUE.",
     );
-    append_section(&mut component, "cinnabar:grants", include_bytes!("../grants.json"));
+    append_section(
+        &mut component,
+        "cinnabar:grants",
+        include_bytes!("../grants.json"),
+    );
     append_section(
         &mut component,
         "cinnabar:extension/icon@1",
@@ -45,16 +49,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// The WASI interfaces the component may import: standard output only, which the packet runtime
 /// links with the WASI grant (it never links files or network). The other imports are type-only
 /// interfaces and types from `mod-api`'s worlds, which wasmtime needs no implementation for.
-const ALLOWED_WASI: [&str; 3] = ["wasi:io/error@0.2.0", "wasi:io/streams@0.2.0", "wasi:cli/stdout@0.2.0"];
+const ALLOWED_WASI: [&str; 3] = [
+    "wasi:io/error@0.2.0",
+    "wasi:io/streams@0.2.0",
+    "wasi:cli/stdout@0.2.0",
+];
 
 /// Prints the component's top-level imports and exports and rejects unexpected imports.
 fn check_interfaces(component: &[u8]) -> Result<(), Box<dyn Error>> {
     let mut depth = 0usize;
     for payload in wasmparser::Parser::new(0).parse_all(component) {
         match payload? {
-            wasmparser::Payload::ModuleSection { .. } | wasmparser::Payload::ComponentSection { .. } => {
-                depth += 1
-            }
+            wasmparser::Payload::ModuleSection { .. }
+            | wasmparser::Payload::ComponentSection { .. } => depth += 1,
             wasmparser::Payload::End(_) => depth = depth.saturating_sub(1),
             wasmparser::Payload::ComponentImportSection(imports) if depth == 0 => {
                 for import in imports {
@@ -77,5 +84,9 @@ fn check_interfaces(component: &[u8]) -> Result<(), Box<dyn Error>> {
 }
 
 fn append_section(component: &mut Vec<u8>, name: &str, data: &[u8]) {
-    CustomSection { name: Cow::Borrowed(name), data: Cow::Borrowed(data) }.append_to_component(component);
+    CustomSection {
+        name: Cow::Borrowed(name),
+        data: Cow::Borrowed(data),
+    }
+    .append_to_component(component);
 }
