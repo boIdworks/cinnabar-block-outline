@@ -7,6 +7,10 @@
 //! it asks for one more right-click and puts the party on RED and everyone else on the map's
 //! other team (see [`opponent`]); on maps without a known pairing Hive places everyone else.
 //!
+//! Changing the map: when the player opens Hive's Map menu by hand in the server (say, to fix a
+//! misclick), the mod shows its own map menu instead and presses the picked map in Hive's. If the
+//! teams were already set and the new map faces RED with another team, they are set again.
+//!
 //! Invites: every player the player invites by hand (Hive's "Invite sent to ..." message) is
 //! remembered and invited again to each later `!autocs` server, until `!autocs end`. `@Name spec`
 //! in chat makes that player a spectator at the next right-click, and again in every later
@@ -217,6 +221,8 @@ pub struct AutoCs {
     maps: Vec<String>,
     /// Each map's picture, by name.
     images: Vec<(String, String)>,
+    /// Hive's Map menu the player opened, held while the mod's map menu stands in for it.
+    changing: Option<u32>,
     answers: Vec<(u64, Vec<u8>)>,
     to_client: Vec<u8>,
     to_server: Vec<u8>,
@@ -252,6 +258,11 @@ struct Run {
     steps: u32,
     /// The reply to the party command, formatting removed and lowercased.
     party: String,
+    /// Until the tick: the party is being read again, because players join it after `!autocs`
+    /// (the first reading only knows the party as it was then).
+    party_refresh: Option<u64>,
+    /// The reply to the second reading, replacing `party` once it is complete.
+    party_new: String,
     role_tries: Vec<(String, u8)>,
     /// Players still to invite to the current server.
     to_invite: Vec<String>,
@@ -280,6 +291,7 @@ impl AutoCs {
             specs: Vec::new(),
             maps: MAPS.iter().map(|map| map.to_string()).collect(),
             images: IMAGES.iter().map(|(map, url)| (map.to_string(), url.to_string())).collect(),
+            changing: None,
             answers: Vec::new(),
             to_client: Vec::new(),
             to_server: Vec::new(),
@@ -301,7 +313,10 @@ impl AutoCs {
                 Some(command) => {
                     let line = command.trim();
                     let line = line.strip_prefix('/').unwrap_or(line);
-                    word(line, "autocs").is_some() && self.typed(&format!("!{line}"))
+                    match autocs_command(line) {
+                        Some(rest) => self.typed(&format!("!autocs {}", rest.trim())),
+                        None => false,
+                    }
                 }
                 None => false,
             },
@@ -361,10 +376,13 @@ impl AutoCs {
             return;
         }
         self.reset();
+        if let Some(hive) = self.changing.take() {
+            self.cancel(hive);
+        }
         if argument.is_empty() {
             self.run.stage = Stage::Picking;
             self.run.picker = menu_order(&self.maps);
-            let form = picker_form(&self.run.picker, &self.images);
+            let form = picker_form(&self.run.picker, &self.images, NEW_SERVER_TEXT);
             packets::form_request(&mut self.to_client, PICKER_FORM, &form.to_string());
         } else {
             match find_map(&self.maps, argument) {
@@ -377,6 +395,10 @@ impl AutoCs {
     }
 
     fn picked(&mut self, response: Option<&str>) {
+        if let Some(hive) = self.changing.take() {
+            self.changed(hive, response);
+            return;
+        }
         if self.run.stage != Stage::Picking {
             return;
         }
@@ -409,8 +431,12 @@ impl AutoCs {
         self.command(PARTY_COMMAND);
     }
 
-    /// Ends a set of games: forgets the players to invite again.
+    /// Ends a set of games: stops any run and forgets the players to invite again.
     fn end(&mut self) {
+        if let Some(hive) = self.changing.take() {
+            self.cancel(hive);
+        }
+        self.reset();
         let names = std::mem::take(&mut self.invites);
         let specs = std::mem::take(&mut self.specs);
         self.run.to_invite.clear();
@@ -469,7 +495,7 @@ impl AutoCs {
             self.say("Teams are set during an §e!autocs§r run, once you're in the server.");
             return;
         }
-        self.run.roles_ready = true;
+        self.ready_for_teams();
         self.run.roles_prompted = true;
         self.say("Right-click the §esettings item§r to set the teams.");
     }
@@ -534,6 +560,11 @@ impl AutoCs {
         if let Stage::Party(_) = self.run.stage {
             self.run.party.push_str(&plain.to_lowercase());
             self.run.party.push('\n');
+        }
+        // Lobby chatter that names players must not read as party members.
+        if self.run.party_refresh.is_some() && !is_chatter(&plain) {
+            self.run.party_new.push_str(&plain.to_lowercase());
+            self.run.party_new.push('\n');
         }
         if (plain.contains(" joined.") || plain.contains(" left."))
             && let Some(count) = lobby_count(&plain)
@@ -650,7 +681,7 @@ impl AutoCs {
         // players are too many for the 4v4.
         if self.players() == FULL_LOBBY {
             if !self.run.roles_prompted {
-                self.run.roles_ready = true;
+                self.ready_for_teams();
                 self.run.roles_prompted = true;
                 self.say(&format!(
                     "{}. §eRight-click the settings item§r to set the teams: your party §cRED§r, {}.",
@@ -672,6 +703,13 @@ impl AutoCs {
             return false;
         };
         let menu = Menu::new(&value);
+        if menu.title == "Map"
+            && !self.run.navigating
+            && matches!(self.run.stage, Stage::Idle | Stage::Lobby)
+            && menu.buttons.iter().any(|button| position(&MAPS, &button.first, |map| map).is_some())
+        {
+            return self.change_map(form, &menu);
+        }
         match self.run.stage {
             Stage::Party(_) => {
                 // A party menu instead of a chat reply: read it and close it.
@@ -834,15 +872,7 @@ impl AutoCs {
                 if invites { menu.button("Invite Username") } else { menu.button("Go Back") }
             }
             "Map" => {
-                self.maps = menu.buttons.iter().map(|button| button.first.clone()).collect();
-                for button in &menu.buttons {
-                    if let Some(url) = &button.image {
-                        match self.images.iter_mut().find(|(map, _)| *map == button.first) {
-                            Some((_, known)) => known.clone_from(url),
-                            None => self.images.push((button.first.clone(), url.clone())),
-                        }
-                    }
-                }
+                self.learn_maps(menu);
                 match menu.button(&self.run.map) {
                     Some(index) if self.run.map_task == Task::Pending => {
                         self.run.map_task = Task::Done;
@@ -918,6 +948,81 @@ impl AutoCs {
         }
     }
 
+    /// Keeps Hive's live map list and pictures from its Map menu.
+    fn learn_maps(&mut self, menu: &Menu) {
+        self.maps = menu.buttons.iter().map(|button| button.first.clone()).collect();
+        for button in &menu.buttons {
+            if let Some(url) = &button.image {
+                match self.images.iter_mut().find(|(map, _)| *map == button.first) {
+                    Some((_, known)) => known.clone_from(url),
+                    None => self.images.push((button.first.clone(), url.clone())),
+                }
+            }
+        }
+    }
+
+    /// Hive's Map menu, opened by the player: hold it and show the mod's map menu instead.
+    fn change_map(&mut self, form: u32, menu: &Menu) -> bool {
+        self.learn_maps(menu);
+        if let Some(stale) = self.changing.replace(form) {
+            self.cancel(stale);
+        }
+        let current = menu
+            .buttons
+            .iter()
+            .find(|button| button.second.to_lowercase().contains("selected"))
+            .map(|button| button.first.clone());
+        self.notes.push(format!("AUTOCS change map from={current:?}"));
+        self.run.picker = menu_order(&self.maps);
+        let content = match current {
+            Some(map) => format!("Now: §b{map}§r. {CHANGE_TEXT}"),
+            None => CHANGE_TEXT.to_string(),
+        };
+        let json = picker_form(&self.run.picker, &self.images, &content);
+        packets::form_request(&mut self.to_client, PICKER_FORM, &json.to_string());
+        true
+    }
+
+    /// The answer to the mod's map menu shown for Hive's Map menu `hive`: press the map there.
+    fn changed(&mut self, hive: u32, response: Option<&str>) {
+        let map = response
+            .and_then(|response| response.trim().parse::<usize>().ok())
+            .and_then(|index| self.run.picker.get(index).cloned());
+        let Some(map) = map else {
+            // Closed: close Hive's too, which takes the player back to Game Settings.
+            self.cancel(hive);
+            return;
+        };
+        let Some(index) = self.maps.iter().position(|known| *known == map) else {
+            self.cancel(hive);
+            self.say(&format!("Hive has no map called §e{map}§r now; pick it by hand."));
+            return;
+        };
+        self.answer(hive, index);
+        self.notes.push(format!("AUTOCS map changed {map:?}"));
+        let in_run = !self.run.map.is_empty();
+        let new_teams = in_run && self.run.roles == Task::Done && opponent(&self.run.map) != opponent(&map);
+        self.run.map = map.clone();
+        if self.run.map_task == Task::Pending {
+            // Set by hand before the mod got to it: keep the player's pick.
+            self.run.map_task = Task::Reported;
+        }
+        if new_teams {
+            // Hive shows Game Settings next: go on to Set Roles and move everyone.
+            self.run.stage = Stage::Lobby;
+            self.run.roles = Task::Pending;
+            self.run.roles_ready = true;
+            self.run.role_tries.clear();
+            self.run.steps = 0;
+            self.run.navigating = true;
+            self.say(&format!("Map changed to §b{map}§r. Setting the teams again: {}.", self.others()));
+        } else if in_run && self.run.roles == Task::Pending {
+            self.say(&format!("Map changed to §b{map}§r. The teams will be {}.", self.others()));
+        } else {
+            self.say(&format!("Map changed to §b{map}§r."));
+        }
+    }
+
     /// Closes the open menu and reports what is left. Closing a `nested` menu makes Hive show
     /// its parent, which the mod answers too (on to Start Game, or closed).
     fn finish(&mut self, form: u32, nested: bool) -> bool {
@@ -953,7 +1058,7 @@ impl AutoCs {
         if say_status {
             if self.run.roles == Task::Pending {
                 if self.players() == FULL_LOBBY {
-                    self.run.roles_ready = true;
+                    self.ready_for_teams();
                     self.say("Right-click the §esettings item§r again to set the teams.");
                 } else if self.players() > FULL_LOBBY {
                     self.say(&format!("{}.", self.not_full_text()));
@@ -973,6 +1078,17 @@ impl AutoCs {
             self.run.stage = Stage::Idle;
         }
         true
+    }
+
+    /// Lets the teams be set at the next right-click, reading the party again first: players
+    /// join the party after `!autocs`, and one the mod doesn't know is put on the other team.
+    fn ready_for_teams(&mut self) {
+        if !self.run.roles_ready && self.run.party_refresh.is_none() {
+            self.run.party_refresh = Some(self.tick + PARTY_TICKS);
+            self.run.party_new.clear();
+            self.command(PARTY_COMMAND);
+        }
+        self.run.roles_ready = true;
     }
 
     /// Whether the teams are to be set now.
@@ -1094,6 +1210,17 @@ impl AutoCs {
                 self.fail("The server didn't start in time (maybe your daily limit?).");
             }
             _ => {}
+        }
+        if let Some(until) = self.run.party_refresh
+            && self.tick >= until
+        {
+            self.run.party_refresh = None;
+            let fresh = std::mem::take(&mut self.run.party_new);
+            if !fresh.trim().is_empty() {
+                let party = fresh.trim().replace('\n', " | ");
+                self.notes.push(format!("AUTOCS party refreshed {party:?}"));
+                self.run.party = fresh;
+            }
         }
         let now = self.tick;
         let (due, later): (Vec<_>, Vec<_>) =
@@ -1233,7 +1360,7 @@ pub fn order_by(maps: &[String], ranking: &[&str]) -> Vec<String> {
 }
 
 /// The map menu: each map with the team the party faces there and Hive's picture.
-fn picker_form(maps: &[String], images: &[(String, String)]) -> Value {
+fn picker_form(maps: &[String], images: &[(String, String)], content: &str) -> Value {
     let buttons: Vec<Value> = maps
         .iter()
         .map(|map| {
@@ -1253,10 +1380,15 @@ fn picker_form(maps: &[String], images: &[(String, String)]) -> Value {
     serde_json::json!({
         "type": "form",
         "title": "Auto CS",
-        "content": "Pick the map for your BedWars Squads custom server. Your party plays §cRED§r; each map shows the team you face.",
+        "content": content,
         "buttons": buttons,
     })
 }
+
+/// The map menu's text for a new server, and for changing the map in one.
+const NEW_SERVER_TEXT: &str =
+    "Pick the map for your BedWars Squads custom server. Your party plays §cRED§r; each map shows the team you face.";
+const CHANGE_TEXT: &str = "Pick the new map. Your party plays §cRED§r; each map shows the team you face.";
 
 /// Removes Minecraft formatting codes (`§` and the character after it).
 pub fn strip(text: &str) -> String {
@@ -1278,6 +1410,15 @@ fn spec_target(message: &str) -> Option<&str> {
     let at = rest.len().checked_sub(" spec".len())?;
     let (name, word) = (rest.get(..at)?, rest.get(at..)?);
     (word.eq_ignore_ascii_case(" spec") && !name.trim().is_empty()).then(|| name.trim())
+}
+
+/// Lines of the lobby's own chatter that must not be read as the party list: joins, leaves,
+/// invites and role changes name players who may not be in the party.
+fn is_chatter(plain: &str) -> bool {
+    plain.contains(" joined.")
+        || plain.contains(" left.")
+        || plain.contains("nvite")
+        || role_set(plain).is_some()
 }
 
 /// The player's name at the end of the text before " joined." or " left." ("» Name").
@@ -1311,6 +1452,15 @@ fn word<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     let rest = &line[name.len()..];
     (head.eq_ignore_ascii_case(name) && rest.chars().next().is_none_or(char::is_whitespace))
         .then_some(rest)
+}
+
+/// The rest of a slash command meant for this mod: `autocs` and slips of it, any command word
+/// starting with `auto` (`/auto end`, `/autocsto end`). Hive has no such command, so nothing of
+/// Hive's is caught.
+fn autocs_command(line: &str) -> Option<&str> {
+    let end = line.find(char::is_whitespace).unwrap_or(line.len());
+    let (name, rest) = line.split_at(end);
+    name.get(..4).is_some_and(|head| head.eq_ignore_ascii_case("auto")).then_some(rest)
 }
 
 /// Whether `text` holds `name` with no letter, digit or underscore on either side.

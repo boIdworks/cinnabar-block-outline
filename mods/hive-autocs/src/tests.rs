@@ -562,6 +562,38 @@ fn full_run_creates_sets_preset_map_and_teams() {
 }
 
 #[test]
+fn players_who_join_the_party_after_autocs_are_put_on_red() {
+    let mut h = Harness::new();
+    // Created before the party is full: only the user was in it.
+    h.join_lobby("Party members (1): Boldworks");
+    h.preset_and_map();
+
+    // H0nri joins the party and the server later; seven others fill the lobby.
+    let others = ["Charlie", "H0nri", "P2", "P3", "P4", "P5"];
+    for (joined, name) in (2..FULL_LOBBY).zip(others) {
+        h.server(&system(&format!("§a§l» §r§7{name} joined. §8[{joined}/16]")));
+    }
+    let (_, sent) = h.server(&system(&format!("§a§l» §r§7P6 joined. §8[{FULL_LOBBY}/16]")));
+    // The lobby is full: the party is read again.
+    assert_eq!(sent.commands, vec![PARTY_COMMAND.to_string()], "{:?}", sent.commands);
+    // Join messages arriving meanwhile do not make anyone a party member.
+    h.server(&system("§a§l» §r§7Charlie joined. §8[8/16]"));
+    h.server(&system("Party members (2): Boldworks, H0nri"));
+    h.run(40);
+
+    h.press(&manage(20), 20, 0);
+    h.press(&game_settings(21), 21, 2);
+    let mut players: Vec<(String, String)> = ["Boldworks", "Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]
+        .iter()
+        .map(|name| (name.to_string(), "Player".to_owned()))
+        .collect();
+    let (sent, _) = h.set_roles(22, &mut players);
+    let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
+    assert_eq!(teams, ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]);
+    assert!(sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"), "{:?}", sent.said);
+}
+
+#[test]
 fn an_access_menu_without_a_public_button_is_skipped_without_a_warp() {
     let mut h = Harness::new();
     h.join_lobby("");
@@ -1168,6 +1200,27 @@ mod invites_and_spectators {
     }
 
     #[test]
+    fn end_works_with_slips_of_the_command() {
+        for typed in ["/auto end", "/autocsto end", "/AutoCS END", "/autocs  end"] {
+            let mut h = host();
+            h.server(&system("Invite sent to H0nri"));
+            let (kept, sent) = h.client(&command(typed));
+            assert!(!kept, "{typed}");
+            assert!(sent.said("I won't invite H0nri again"), "{typed}: {:?}", sent.said);
+        }
+    }
+
+    #[test]
+    fn end_stops_a_run_in_the_server() {
+        let mut h = Harness::new();
+        h.join_lobby("");
+        let (_, sent) = h.client(&command("/autocs end"));
+        assert!(sent.said("Game over"), "{:?}", sent.said);
+        // The settings menus are the player's again.
+        assert!(h.server(&manage(5)).0);
+    }
+
+    #[test]
     fn end_forgets_the_invites() {
         let mut h = host();
         h.server(&system("Invite sent to boldworks"));
@@ -1511,5 +1564,129 @@ mod batch_rewrite {
         // A change in the middle keeps the packets before it.
         let out = rewrite(&packets, batch.len(), |packet| (packet.id == 2).then_some(None));
         assert_eq!(ids(&out.unwrap()), [1, 3]);
+    }
+}
+
+// ---- changing the map in the server -------------------------------------------------------------
+
+mod change_map {
+    use super::*;
+
+    /// Hive's Map menu with Rome added (YELLOW faces RED there), Temple selected.
+    fn hive_maps(form: u32) -> Vec<u8> {
+        menu(form, "Map", "This menu allows you to select any available map.", &[
+            ("Random", "Select to equip"),
+            ("Autumn", "Select to equip"),
+            ("Rome", "Select to equip"),
+            ("Temple", "» Selected «"),
+        ])
+    }
+
+    /// Opens Hive's Map menu by hand; returns the mod's menu in its place.
+    fn open(h: &mut Harness, form: u32) -> Vec<(String, String, Option<String>)> {
+        let (kept, sent) = h.server(&hive_maps(form));
+        assert!(!kept, "Hive's Map menu should be replaced");
+        let (id, json) = &sent.forms[0];
+        assert_eq!(*id, PICKER_FORM);
+        assert!(json.contains("Now: §bTemple"), "{json}");
+        picker_buttons(json)
+    }
+
+    fn pick(h: &mut Harness, buttons: &[(String, String, Option<String>)], map: &str) -> Sent {
+        let index = buttons.iter().position(|(name, _, _)| name == map).unwrap();
+        let mut answer = Vec::new();
+        packets::form_response(&mut answer, PICKER_FORM, &format!("{index}\n"));
+        let (kept, sent) = h.client(&answer);
+        assert!(!kept);
+        sent
+    }
+
+    #[test]
+    fn opening_hives_map_menu_shows_the_mods_and_presses_the_pick() {
+        let mut h = Harness::new();
+        h.join_lobby("");
+        h.preset_and_map();
+        let buttons = open(&mut h, 30);
+        let sent = pick(&mut h, &buttons, "Rome");
+        assert_eq!(sent.answers, vec![(30, Some("2\n".into()))]);
+        assert!(sent.said("Map changed to Rome"), "{:?}", sent.said);
+        assert!(sent.said("YELLOW"), "{:?}", sent.said);
+        // Hive's Game Settings after the pick stays the player's.
+        assert!(h.server(&game_settings(31)).0);
+    }
+
+    #[test]
+    fn closing_the_mods_menu_closes_hives() {
+        let mut h = Harness::new();
+        h.join_lobby("");
+        h.preset_and_map();
+        open(&mut h, 30);
+        let mut answer = Vec::new();
+        packets::form_cancel(&mut answer, PICKER_FORM);
+        let (_, sent) = h.client(&answer);
+        assert_eq!(sent.answers, vec![(30, None)]);
+        assert!(sent.commands.is_empty());
+    }
+
+    #[test]
+    fn a_server_made_by_hand_gets_the_menu_too() {
+        let mut h = Harness::new();
+        let buttons = open(&mut h, 7);
+        let sent = pick(&mut h, &buttons, "Autumn");
+        assert_eq!(sent.answers, vec![(7, Some("1\n".into()))]);
+        assert!(sent.said("Map changed to Autumn"));
+    }
+
+    /// A full lobby on Temple with the teams set; returns the players as Hive lists them.
+    fn teams_on_temple(h: &mut Harness) -> Vec<(String, String)> {
+        h.join_lobby("Party: Boldworks, H0nri");
+        h.preset_and_map();
+        for (joined, name) in (2..=FULL_LOBBY).zip(["Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]) {
+            h.server(&system(&format!("§a§l» §r§7{name} joined. §8[{joined}/16]")));
+        }
+        h.press(&manage(20), 20, 0);
+        h.press(&game_settings(21), 21, 2);
+        let mut players: Vec<(String, String)> = ["Boldworks", "Charlie", "H0nri", "P2", "P3", "P4", "P5", "P6"]
+            .iter()
+            .map(|name| (name.to_string(), "Player".to_owned()))
+            .collect();
+        let (_, next) = h.set_roles(22, &mut players);
+        assert_eq!(players[1].1, "BLUE");
+        h.press(&game_settings(next), next, 5);
+        h.close(&manage(next + 1), next + 1);
+        players
+    }
+
+    #[test]
+    fn a_new_opponent_sets_the_teams_again() {
+        let mut h = Harness::new();
+        let mut players = teams_on_temple(&mut h);
+
+        // Misclicked Temple: open Hive's Map menu and pick Rome, where YELLOW faces RED.
+        let buttons = open(&mut h, 60);
+        let sent = pick(&mut h, &buttons, "Rome");
+        assert!(sent.said("Setting the teams again"), "{:?}", sent.said);
+        // Hive shows Game Settings next: on to Set Roles, everyone else to YELLOW.
+        h.press(&game_settings(61), 61, 2);
+        let (sent, next) = h.set_roles(62, &mut players);
+        let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
+        assert_eq!(teams, ["RED", "YELLOW", "RED", "YELLOW", "YELLOW", "YELLOW", "YELLOW", "YELLOW"]);
+        assert!(sent.said("RED Boldworks, H0nri | YELLOW Charlie"), "{:?}", sent.said);
+        h.press(&game_settings(next), next, 5);
+        h.close(&manage(next + 1), next + 1);
+        assert!(h.server(&manage(next + 2)).0);
+    }
+
+    #[test]
+    fn the_same_opponent_keeps_the_teams() {
+        let mut h = Harness::new();
+        teams_on_temple(&mut h);
+        let buttons = open(&mut h, 60);
+        // Autumn faces BLUE like Temple: nothing to move, and Game Settings is the player's.
+        let sent = pick(&mut h, &buttons, "Autumn");
+        assert_eq!(sent.answers, vec![(60, Some("1
+".into()))]);
+        assert!(!sent.said("Setting the teams again"), "{:?}", sent.said);
+        assert!(h.server(&game_settings(61)).0);
     }
 }
