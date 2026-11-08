@@ -70,18 +70,19 @@ impl AutoCs {
             if button.second.eq_ignore_ascii_case(team) {
                 continue;
             }
-            let tries = match self
+            let slot = match self
                 .run
                 .role_tries
-                .iter_mut()
-                .find(|(name, _)| *name == button.first)
+                .iter()
+                .position(|(name, _)| *name == button.first)
             {
-                Some((_, tries)) => tries,
+                Some(slot) => slot,
                 None => {
                     self.run.role_tries.push((button.first.clone(), 0));
-                    &mut self.run.role_tries.last_mut().unwrap().1
+                    self.run.role_tries.len() - 1
                 }
             };
+            let tries = &mut self.run.role_tries[slot].1;
             if *tries < MAX_ROLE_TRIES {
                 *tries += 1;
                 return Some(index);
