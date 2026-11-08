@@ -94,177 +94,216 @@ pub(super) fn controls() -> &'static [Control] {
 }
 
 fn build() -> Vec<Control> {
-    let mut table: Vec<Control> = Vec::with_capacity(112);
-    let mut add = |view: View, area: [f32; 4], tip: &'static str, action: Action| {
-        table.push(Control {
+    let mut table = Table(Vec::with_capacity(112));
+    home(&mut table);
+    block_and_mob(&mut table);
+    counter(&mut table);
+    cps(&mut table);
+    lighting(&mut table);
+    jump(&mut table);
+    crosshair(&mut table);
+    zoom(&mut table);
+    always(&mut table);
+    table.0
+}
+
+/// The controls being collected, in the order the keyboard walks them.
+struct Table(Vec<Control>);
+
+impl Table {
+    fn add(&mut self, view: View, area: [f32; 4], tip: &'static str, action: Action) {
+        self.0.push(Control {
             view,
             area,
             tip,
             action,
         });
-    };
-    let press = |id: &str| Action::Press(id.to_owned());
-    let full = SETTINGS_W - 20.0;
-    let right = 10.0 + HALF + 4.0;
-    let home_switch_x = 10.0 + HOME_BUTTON_W + HOME_GAP;
-    let row = |y: f32| [10.0, y, full, BUTTON_H];
-    let half = |y: f32| [10.0, y, HALF, BUTTON_H];
-    let half_right = |y: f32| [right, y, HALF, BUTTON_H];
-    // A value with - and + beside it: the row (for the keyboard), the value and the pair.
-    let value_area = |y: f32| [10.0, y, HIGHLIGHT_W, BUTTON_H];
-    let pair_area = |y: f32| {
-        [
-            10.0 + HIGHLIGHT_W,
-            y,
-            SETTINGS_W - 20.0 - HIGHLIGHT_W,
-            BUTTON_H,
-        ]
-    };
-    const STEPPER_TIP: &str = "Left/Right change it; Enter resets it";
-    const TYPE: &str = "Click, type a number, press Enter";
+    }
+}
 
+fn press(id: &str) -> Action {
+    Action::Press(id.to_owned())
+}
+
+const FULL: f32 = SETTINGS_W - 20.0;
+const RIGHT: f32 = 10.0 + HALF + 4.0;
+const HOME_SWITCH_X: f32 = 10.0 + HOME_BUTTON_W + HOME_GAP;
+const STEPPER_TIP: &str = "Left/Right change it; Enter resets it";
+const TYPE: &str = "Click, type a number, press Enter";
+
+fn row(y: f32) -> [f32; 4] {
+    [10.0, y, FULL, BUTTON_H]
+}
+
+fn half(y: f32) -> [f32; 4] {
+    [10.0, y, HALF, BUTTON_H]
+}
+
+fn half_right(y: f32) -> [f32; 4] {
+    [RIGHT, y, HALF, BUTTON_H]
+}
+
+/// A value with - and + beside it: the row (for the keyboard), the value and the pair.
+fn value_area(y: f32) -> [f32; 4] {
+    [10.0, y, HIGHLIGHT_W, BUTTON_H]
+}
+
+fn pair_area(y: f32) -> [f32; 4] {
+    [
+        10.0 + HIGHLIGHT_W,
+        y,
+        SETTINGS_W - 20.0 - HIGHLIGHT_W,
+        BUTTON_H,
+    ]
+}
+
+/// The start page: a button and a switch for each tool.
+fn home(t: &mut Table) {
     // The start page.
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_BLOCK_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Colours and size of the block outline",
         press("open_block"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_BLOCK_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_BLOCK_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Show or hide the block outline",
         Action::Toggle("home_block"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_MOB_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Colours and size of mob hitboxes",
         press("open_mob"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_MOB_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_MOB_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Show or hide mob hitboxes",
         Action::Toggle("home_mob"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_COUNTER_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Shows how many arrows you carry",
         press("open_counter"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_COUNTER_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_COUNTER_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Show or hide the arrow counter",
         Action::Toggle("home_counter"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_CPS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Left and right clicks per second",
         press("open_cps"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_CPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_CPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Show or hide the CPS counter",
         Action::Toggle("home_cps"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_FPS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Frames per second, on your HUD",
         press("open_fps"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_FPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_FPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Show or hide the FPS counter",
         Action::Toggle("home_fps"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_ZOOM_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Hold a key to zoom in smoothly",
         press("open_zoom"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_ZOOM_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_ZOOM_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Turn zoom on or off",
         Action::Toggle("home_zoom"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_LIGHT_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Fullbright and its key",
         press("open_light"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_LIGHT_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_LIGHT_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Turn fullbright on or off",
         Action::Toggle("home_light"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_JUMP_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Tells you if you jump early or late",
         press("open_jump"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_JUMP_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_JUMP_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Turn the jump reset timing on or off",
         Action::Toggle("home_jump"),
     );
-    add(
+    t.add(
         View::Home,
         [10.0, HOME_CROSS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Shape, size and colour of your crosshair",
         press("open_crosshair"),
     );
-    add(
+    t.add(
         View::Home,
-        [home_switch_x, HOME_CROSS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        [HOME_SWITCH_X, HOME_CROSS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Use your own crosshair or the game's",
         Action::Toggle("home_crosshair"),
     );
-    add(
+    t.add(
         View::Home,
         row(HOME_KEY_Y),
         "Click, press a key; Esc cancels",
         Action::Key("menu_key"),
     );
+}
 
+/// The Block outline and Mob hitbox pages: the colour buttons, the settings view and the colour view.
+fn block_and_mob(t: &mut Table) {
     // The Block outline and Mob hitbox pages: the colour buttons at the top.
-    add(
+    t.add(
         View::FillOwn,
         half(EDIT_Y),
         "Shows or hides the line colour tools",
         press("edit_line"),
     );
-    add(
+    t.add(
         View::FillOwn,
         half_right(EDIT_Y),
         "Shows or hides the fill colour tools",
         press("edit_fill"),
     );
-    add(
+    t.add(
         View::FillMatch,
         row(EDIT_Y),
         "Colour tools; the fill uses it too",
         press("edit_line"),
     );
-    add(
+    t.add(
         View::MobTop,
         half(EDIT_Y),
         "Hitbox colour; the fill uses it too",
         press("edit_line"),
     );
-    add(
+    t.add(
         View::MobTop,
         half_right(EDIT_Y),
         "Colour of the mob you aim at",
@@ -280,77 +319,77 @@ fn build() -> Vec<Control> {
         let (_, y) = slider_place(index);
         [VALUE_X, y, VALUE_WIDTH, ROW_HEIGHT]
     };
-    add(View::Settings, number_box(3), TYPE, Action::Help);
-    add(
+    t.add(View::Settings, number_box(3), TYPE, Action::Help);
+    t.add(
         View::Settings,
         slider_row(3),
         "How solid the lines are (0 = invisible)",
         Action::Slider(3),
     );
-    add(View::Settings, number_box(4), TYPE, Action::Help);
-    add(
+    t.add(View::Settings, number_box(4), TYPE, Action::Help);
+    t.add(
         View::Settings,
         slider_row(4),
         "Line thickness; thins out far away",
         Action::Slider(4),
     );
-    add(View::BlockOnly, number_box(5), TYPE, Action::Help);
-    add(
+    t.add(View::BlockOnly, number_box(5), TYPE, Action::Help);
+    t.add(
         View::BlockOnly,
         slider_row(5),
         "Tints the faces (0 = off)",
         Action::Slider(5),
     );
-    add(
+    t.add(
         View::BlockOnly,
         half(TOGGLES_Y),
         "Lines cycle through every colour",
         Action::Toggle("rainbow"),
     );
-    add(
+    t.add(
         View::BlockOnly,
         half_right(TOGGLES_Y),
         "The outline gently fades in and out",
         Action::Toggle("pulse"),
     );
     // Mob hitboxes have no pulse: their Rainbow switch takes the whole row.
-    add(
+    t.add(
         View::MobOnly,
         row(TOGGLES_Y),
         "Lines cycle through every colour",
         Action::Toggle("rainbow"),
     );
-    add(
+    t.add(
         View::BlockOnly,
         half(BOTTOM_Y),
         "On: the fill uses the line colour",
         Action::Toggle("fill_match"),
     );
-    add(
+    t.add(
         View::MobOnly,
         half(BOTTOM_Y),
         "Off: only the mob you aim at",
         Action::Toggle("show_all_mobs"),
     );
-    add(
+    t.add(
         View::Settings,
         half_right(BOTTOM_Y),
         "Resets this page; click twice to confirm",
         press("reset"),
     );
-    add(
+    t.add(
         View::BlockOnly,
         value_area(HIGHLIGHT_Y),
         "Hides the game's highlight; click: on/off",
         Action::Help,
     );
-    add(
+    t.add(
         View::BlockOnly,
         pair_area(HIGHLIGHT_Y),
         "5%% weaker or stronger",
         Action::Help,
     );
-    add(
+    t.add(
         View::BlockOnly,
         row(HIGHLIGHT_Y),
         "Left/Right change it; Enter: on/off",
@@ -370,24 +409,24 @@ fn build() -> Vec<Control> {
     .into_iter()
     .enumerate()
     {
-        add(View::Colour, number_box(index), TYPE, Action::Help);
-        add(View::Colour, slider_row(index), tip, Action::Slider(index));
+        t.add(View::Colour, number_box(index), TYPE, Action::Help);
+        t.add(View::Colour, slider_row(index), tip, Action::Slider(index));
     }
     let [wx, wy, side] = WHEEL;
-    add(
+    t.add(
         View::Colour,
         [wx, wy, side, side],
         "Angle picks the hue; centre is paler",
         Action::Help,
     );
     let hex_w = SETTINGS_W - 10.0 - HEX_X;
-    add(
+    t.add(
         View::Colour,
         [HEX_X, HEX_Y, hex_w, 58.0],
         "Click, type e.g. FF8800, press Enter",
         Action::Help,
     );
-    add(
+    t.add(
         View::Colour,
         [HEX_X, HEX_Y + 12.0, hex_w, BUTTON_H],
         "Click, type e.g. FF8800, press Enter",
@@ -395,7 +434,7 @@ fn build() -> Vec<Control> {
     );
     let swatch_width = (SETTINGS_W - 20.0) / SWATCHES.len() as f32;
     for (index, (name, _)) in SWATCHES.iter().enumerate() {
-        add(
+        t.add(
             View::Colour,
             [
                 10.0 + swatch_width * index as f32,
@@ -408,7 +447,7 @@ fn build() -> Vec<Control> {
         );
     }
     for slot in 0..FAVOURITES {
-        add(
+        t.add(
             View::Colour,
             [
                 10.0 + 34.0 * slot as f32,
@@ -421,7 +460,7 @@ fn build() -> Vec<Control> {
         );
     }
     let save_x = 10.0 + 34.0 * FAVOURITES as f32;
-    add(
+    t.add(
         View::Colour,
         [
             save_x,
@@ -432,39 +471,42 @@ fn build() -> Vec<Control> {
         "Saves the colour being edited",
         press("save_favourite"),
     );
+}
 
+/// The Arrow counter page.
+fn counter(t: &mut Table) {
     // The Arrow counter page.
-    add(
+    t.add(
         View::Counter,
         row(COUNTER_ON_Y),
         "Shows or hides the arrow counter",
         Action::Toggle("counter"),
     );
-    add(
+    t.add(
         View::Counter,
         row(COUNTER_BOW_Y),
         "Only while a bow or crossbow is held",
         Action::Toggle("counter_bow"),
     );
-    add(
+    t.add(
         View::Counter,
         row(COUNTER_MOVE_Y),
         "Move the HUD: drag, scroll to resize",
         press("counter_move"),
     );
-    add(
+    t.add(
         View::Counter,
         value_area(COUNTER_SIZE_Y),
         "Click the size to reset it to 100%%",
         Action::Help,
     );
-    add(
+    t.add(
         View::Counter,
         pair_area(COUNTER_SIZE_Y),
         "10%% smaller or bigger",
         Action::Help,
     );
-    add(
+    t.add(
         View::Counter,
         row(COUNTER_SIZE_Y),
         STEPPER_TIP,
@@ -474,51 +516,54 @@ fn build() -> Vec<Control> {
             more: "counter_bigger",
         },
     );
-    add(
+    t.add(
         View::Counter,
         row(COUNTER_RESET_Y),
         "Beside the hotbar at 100%%; click twice",
         press("counter_reset"),
     );
+}
 
+/// The CPS and FPS counter pages.
+fn cps(t: &mut Table) {
     // The CPS page.
-    add(
+    t.add(
         View::Cps,
         row(CPS_ON_Y),
         "Shows or hides the clicks per second",
         Action::Toggle("cps_on"),
     );
-    add(
+    t.add(
         View::Cps,
         row(CPS_RIGHT_Y),
         "Also show the right mouse button",
         Action::Toggle("cps_right"),
     );
-    add(
+    t.add(
         View::Cps,
         row(CPS_ZEROS_Y),
         "Show 07 instead of 7",
         Action::Toggle("cps_zeros"),
     );
-    add(
+    t.add(
         View::Cps,
         row(CPS_MOVE_Y),
         "Move the HUD: drag, scroll to resize",
         press("cps_move"),
     );
-    add(
+    t.add(
         View::Cps,
         value_area(CPS_SIZE_Y),
         "Click the size to reset it to 100%%",
         Action::Help,
     );
-    add(
+    t.add(
         View::Cps,
         pair_area(CPS_SIZE_Y),
         "10%% smaller or bigger",
         Action::Help,
     );
-    add(
+    t.add(
         View::Cps,
         row(CPS_SIZE_Y),
         STEPPER_TIP,
@@ -528,37 +573,37 @@ fn build() -> Vec<Control> {
             more: "cps_size_more",
         },
     );
-    add(
+    t.add(
         View::Cps,
         row(CPS_RESET_Y),
         "Top left at 100%%; click twice",
         press("cps_reset"),
     );
-    add(
+    t.add(
         View::Fps,
         row(FPS_ON_Y),
         "Shows or hides the frames per second",
         Action::Toggle("fps_on"),
     );
-    add(
+    t.add(
         View::Fps,
         row(FPS_MOVE_Y),
         "Move the HUD: drag, scroll to resize",
         press("fps_move"),
     );
-    add(
+    t.add(
         View::Fps,
         value_area(FPS_SIZE_Y),
         "Click the size to reset it to 100%%",
         Action::Help,
     );
-    add(
+    t.add(
         View::Fps,
         pair_area(FPS_SIZE_Y),
         "10%% smaller or bigger",
         Action::Help,
     );
-    add(
+    t.add(
         View::Fps,
         row(FPS_SIZE_Y),
         STEPPER_TIP,
@@ -568,47 +613,53 @@ fn build() -> Vec<Control> {
             more: "fps_size_more",
         },
     );
-    add(
+    t.add(
         View::Fps,
         row(FPS_RESET_Y),
         "Below the CPS at 100%%; click twice",
         press("fps_reset"),
     );
+}
 
+/// The Lighting page.
+fn lighting(t: &mut Table) {
     // The Lighting page.
-    add(
+    t.add(
         View::Lighting,
         row(LIGHT_ON_Y),
         "Lights up caves and nights (only you)",
         Action::Toggle("fullbright"),
     );
-    add(
+    t.add(
         View::Lighting,
         row(LIGHT_KEY_Y),
         "Click, press a key; Del clears it",
         Action::Key("fullbright_key"),
     );
+}
 
+/// The Jump reset page.
+fn jump(t: &mut Table) {
     // The Jump reset page.
-    add(
+    t.add(
         View::JumpReset,
         row(JUMP_ON_Y),
         "Shows early or late when you jump",
         Action::Toggle("jump_on"),
     );
-    add(
+    t.add(
         View::JumpReset,
         value_area(JUMP_WINDOW_Y),
         "Jumps this close to the hit are perfect",
         Action::Help,
     );
-    add(
+    t.add(
         View::JumpReset,
         pair_area(JUMP_WINDOW_Y),
         "5 ms narrower or wider",
         Action::Help,
     );
-    add(
+    t.add(
         View::JumpReset,
         row(JUMP_WINDOW_Y),
         STEPPER_TIP,
@@ -618,16 +669,19 @@ fn build() -> Vec<Control> {
             more: "jump_window_more",
         },
     );
+}
 
+/// The Crosshair page and its drawing view.
+fn crosshair(t: &mut Table) {
     // The Crosshair page: its colour button, shown above the colour tools and the drawing too,
     // and beside it Draw, or (in the drawing view) the resolution.
-    add(
+    t.add(
         View::CrosshairTop,
         half(EDIT_Y),
         "Shows or hides the colour tools",
         press("crosshair_colour"),
     );
-    add(
+    t.add(
         View::CrosshairDrawButton,
         half_right(EDIT_Y),
         "Paint your own crosshair, pixel by pixel",
@@ -665,28 +719,28 @@ fn build() -> Vec<Control> {
             "crosshair_opacity_more",
         ),
     ]) {
-        add(View::Crosshair, value_area(y), value_tip, Action::Help);
-        add(View::Crosshair, pair_area(y), pair_tip, Action::Help);
-        add(
+        t.add(View::Crosshair, value_area(y), value_tip, Action::Help);
+        t.add(View::Crosshair, pair_area(y), pair_tip, Action::Help);
+        t.add(
             View::Crosshair,
             row(y),
             STEPPER_TIP,
             Action::Stepper { value, less, more },
         );
     }
-    add(
+    t.add(
         View::Crosshair,
         half(CROSS_TOGGLES_Y),
         "Use it in place of the game's crosshair",
         Action::Toggle("crosshair_on"),
     );
-    add(
+    t.add(
         View::Crosshair,
         half_right(CROSS_TOGGLES_Y),
         "A thin dark edge, seen on any ground",
         Action::Toggle("crosshair_outline"),
     );
-    add(
+    t.add(
         View::Crosshair,
         row(CROSS_RESET_Y),
         "Back to defaults; click twice",
@@ -695,19 +749,19 @@ fn build() -> Vec<Control> {
 
     // The drawing view: the grid, then Mirror and Clear.
     let [gx, gy, side] = DRAW_GRID;
-    add(
+    t.add(
         View::Draw,
         [gx, gy, side, side],
         "Left click draws, right click erases",
         Action::Help,
     );
-    add(
+    t.add(
         View::Draw,
         [TOP_RIGHT_X, EDIT_Y, RES_VALUE_W, BUTTON_H],
         "Pixels a side; click for 16x16",
         Action::Help,
     );
-    add(
+    t.add(
         View::Draw,
         [
             TOP_RIGHT_X + RES_VALUE_W,
@@ -718,7 +772,7 @@ fn build() -> Vec<Control> {
         "Half or twice as many pixels",
         Action::Help,
     );
-    add(
+    t.add(
         View::Draw,
         half_right(EDIT_Y),
         STEPPER_TIP,
@@ -728,45 +782,48 @@ fn build() -> Vec<Control> {
             more: "crosshair_res_more",
         },
     );
-    add(
+    t.add(
         View::Draw,
         half(DRAW_BUTTONS_Y),
         "Paints all four quarters at once",
         Action::Toggle("crosshair_mirror"),
     );
-    add(
+    t.add(
         View::Draw,
         half_right(DRAW_BUTTONS_Y),
         "Empties the grid; click twice",
         press("crosshair_clear"),
     );
+}
 
+/// The Zoom page.
+fn zoom(t: &mut Table) {
     // The Zoom page.
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_ON_Y),
         "Turns the zoom key on or off",
         Action::Toggle("zoom"),
     );
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_KEY_Y),
         "Click, press a key; Del clears it",
         Action::Key("zoom_key"),
     );
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_MODE_Y),
         "Hold the key, or press to toggle",
         Action::Toggle("zoom_mode"),
     );
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_SCROLL_Y),
         "Scroll to zoom; moves hotbar slot too",
         Action::Toggle("zoom_scroll"),
     );
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_SENS_Y),
         "Look more slowly while zoomed in",
@@ -792,43 +849,45 @@ fn build() -> Vec<Control> {
             ("zoom_step", "zoom_step_less", "zoom_step_more"),
         ),
     ] {
-        add(View::Zoom, value_area(y), value_tip, Action::Help);
-        add(View::Zoom, pair_area(y), pair_tip, Action::Help);
-        add(
+        t.add(View::Zoom, value_area(y), value_tip, Action::Help);
+        t.add(View::Zoom, pair_area(y), pair_tip, Action::Help);
+        t.add(
             View::Zoom,
             row(y),
             STEPPER_TIP,
             Action::Stepper { value, less, more },
         );
     }
-    add(
+    t.add(
         View::Zoom,
         row(ZOOM_RESET_Y),
         "Zoom back to defaults; click twice",
         press("zoom_reset"),
     );
+}
 
+/// Back, Close, the title and the bottom line: last, so the keyboard reaches them last.
+fn always(t: &mut Table) {
     // Back and Close come last for the keyboard; the title and bottom line are help only.
-    add(View::Page, BACK_AREA, "Goes back one step", press("back"));
-    add(
+    t.add(View::Page, BACK_AREA, "Goes back one step", press("back"));
+    t.add(
         View::Always,
         CLOSE_AREA,
         "Closes the menu (Esc does too)",
         press("close"),
     );
-    add(
+    t.add(
         View::Always,
         [10.0, 4.0, 150.0, 18.0],
         "Outlines, counter, zoom and fullbright",
         Action::Help,
     );
-    add(
+    t.add(
         View::Always,
-        [10.0, CARD_H - 18.0, full, 14.0],
+        [10.0, CARD_H - 18.0, FULL, 14.0],
         HINT_TIP,
         Action::Hint,
     );
-    table
 }
 
 mod nav;
