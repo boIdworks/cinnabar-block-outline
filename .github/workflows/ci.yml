@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the compiler and the wasm target.
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (native, tests included)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (wasm guests)
+        run: cargo clippy -p boldy-mods -p hive-autocs --target wasm32-unknown-unknown --release --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  build:
+    name: Build the components
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and pack Boldy Mods
+        run: python3 scripts/build-mod.py --no-install
+      - name: Build and pack Hive Auto CS
+        run: python3 scripts/build-autocs.py --no-install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: components
+          path: dist/*.wasm
+
+  host-check:
+    name: Cinnabar accepts the HUD and menu documents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: python3 -m pip install wasmtime
+      - run: python3 scripts/check-host.py
