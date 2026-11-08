@@ -71,7 +71,7 @@ The installed file name stays `block-outline.wasm` although the crate is called 
 
 ## Permissions
 
-Permissions (`mods\block-outline\pack\grants.json`): `terrain` to read block selection shapes, `world_draw` for the outline and fill (round joins and caps), `render` as a fallback line renderer when World drawing is not allowed, `settings` to remember your choices, `controls` for the menu, its key and your jump key, `hud` to notice Hide HUD (F1), draw the arrow counter and the crosshair, and hide the game's crosshair, `player_state` to count the arrows in your inventory and see the hotbar slot move for scroll zoom and to see when you are hurt for jump reset, `camera` (Camera rotation) to apply the zoom, `players` and `entities` to see mobs and players in front of blocks, and `fullbright` for the Fullbright switch.
+Declared in `mods\boldy-mods\pack\grants.json`: `terrain` to read block selection shapes, `world_draw` for the outline and fill (round joins and caps), `render` as a fallback line renderer when World drawing is not allowed, `settings` to remember your choices, `controls` for the menu, its key and your jump key, `hud` to notice Hide HUD (F1), draw the arrow counter and the crosshair, and hide the game's crosshair, `player_state` to count the arrows in your inventory and see the hotbar slot move for scroll zoom and to see when you are hurt for jump reset, `camera` (Camera rotation) to apply the zoom, `players` and `entities` to see mobs and players in front of blocks, and `fullbright` for the Fullbright switch.
 
 ## Cinnabar's own selection
 
