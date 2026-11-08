@@ -56,11 +56,17 @@ pub struct MenuState {
     /// Which element the keys and Reset act on while moving: the CPS readout (true) or the
     /// arrow counter (false), whichever was grabbed last.
     pub moving_cps: bool,
+    /// The same for the FPS counter; it wins over `moving_cps` when both are set.
+    pub moving_fps: bool,
     /// The moving guide sits at the bottom of the screen, because the counter is near the top.
     pub guide_bottom: bool,
     /// Fuel the last frame used and the busiest frame used, in thousands (of 200): shown at the
     /// foot of the start page.
     pub fuel_k: [u16; 2],
+    /// The Crosshair page shows its drawing grid in place of its settings.
+    pub drawing: bool,
+    /// The last pixel drawn was refused because the drawing would be too detailed to send.
+    pub draw_full: bool,
 }
 
 /// The reset buttons, which ask for a second click before they change anything.
@@ -72,7 +78,11 @@ pub enum Reset {
     Page,
     Counter,
     Cps,
+    Fps,
     Zoom,
+    Crosshair,
+    /// The drawing grid's Clear.
+    Drawing,
 }
 
 /// How long a reset button waits for its second click, in seconds.
@@ -88,15 +98,23 @@ pub enum Page {
     Mob,
     Counter,
     Cps,
+    Fps,
     Zoom,
     Lighting,
     JumpReset,
+    Crosshair,
 }
 
 impl Page {
     /// The Block outline or Mob hitbox page, which share the outline controls.
     pub fn outline(self) -> bool {
         matches!(self, Page::Block | Page::Mob)
+    }
+
+    /// A page with a colour to edit, which the colour tools can replace: the outline pages and
+    /// the Crosshair page.
+    pub fn has_colour(self) -> bool {
+        self.outline() || self == Page::Crosshair
     }
 }
 
@@ -151,7 +169,7 @@ impl Typing {
 /// screen, where the outline is, stays clear.
 const SETTINGS_W: f32 = 264.0;
 /// Card height, the same for the settings and the colour tools so nothing moves when switching.
-const CARD_H: f32 = 332.0;
+const CARD_H: f32 = 338.0;
 /// Height of every button and small control row; tall enough to hit comfortably.
 const BUTTON_H: f32 = 18.0;
 /// Vertical distance between two rows of buttons.
@@ -262,9 +280,59 @@ const JUMP_WINDOW: usize = JUMP_ON + 1;
 const JUMP_WINDOW_LESS: usize = JUMP_WINDOW + 1;
 const JUMP_WINDOW_MORE: usize = JUMP_WINDOW_LESS + 1;
 const HOME_JUMP_ON: usize = JUMP_WINDOW_MORE + 1;
+/// The start page's Crosshair button and its switch, then that page's controls: the colour
+/// button, four values with - and + (style, length, thickness, gap), opacity likewise, two
+/// switches and reset.
+const OPEN_CROSS: usize = HOME_JUMP_ON + 1;
+const HOME_CROSS_ON: usize = OPEN_CROSS + 1;
+const CROSS_COLOUR: usize = HOME_CROSS_ON + 1;
+const CROSS_STYLE: usize = CROSS_COLOUR + 1;
+const CROSS_LENGTH: usize = CROSS_STYLE + 3;
+const CROSS_THICK: usize = CROSS_LENGTH + 3;
+const CROSS_GAP: usize = CROSS_THICK + 3;
+const CROSS_OPACITY: usize = CROSS_GAP + 3;
+const CROSS_ON: usize = CROSS_OPACITY + 3;
+const CROSS_OUTLINE: usize = CROSS_ON + 1;
+const CROSS_RESET: usize = CROSS_OUTLINE + 1;
+/// The Crosshair page's Draw button, and the drawing view's Mirror switch and Clear button.
+const CROSS_DRAW: usize = CROSS_RESET + 1;
+const DRAW_MIRROR: usize = CROSS_DRAW + 1;
+const DRAW_CLEAR: usize = DRAW_MIRROR + 1;
+/// The drawing view's resolution, with its - and + buttons.
+const DRAW_RES: usize = DRAW_CLEAR + 1;
+/// The Crosshair page's values: id, caption, first control index (the value; its - and +
+/// follow) and row.
+const CROSS_VALUES: [(&str, &str, usize, f32); 5] = [
+    ("crosshair_style", "Style", CROSS_STYLE, CROSS_STYLE_Y),
+    ("crosshair_length", "Length", CROSS_LENGTH, CROSS_LENGTH_Y),
+    (
+        "crosshair_thickness",
+        "Thickness",
+        CROSS_THICK,
+        CROSS_THICK_Y,
+    ),
+    ("crosshair_gap", "Gap", CROSS_GAP, CROSS_GAP_Y),
+    (
+        "crosshair_opacity",
+        "Opacity",
+        CROSS_OPACITY,
+        CROSS_OPACITY_Y,
+    ),
+];
+/// The FPS counter page's controls, added last so earlier indices never move: the switch,
+/// moving, the size value beside its - and + buttons, and reset.
+const FPS_ON: usize = DRAW_RES + 3;
+const FPS_MOVE: usize = FPS_ON + 1;
+const FPS_SIZE: usize = FPS_MOVE + 1;
+const FPS_SMALLER: usize = FPS_SIZE + 1;
+const FPS_BIGGER: usize = FPS_SMALLER + 1;
+const FPS_RESET: usize = FPS_BIGGER + 1;
+/// The start page's FPS counter button and its switch.
+const OPEN_FPS: usize = FPS_RESET + 1;
+const HOME_FPS_ON: usize = OPEN_FPS + 1;
 /// The last control index.
 #[cfg(test)]
-const LAST_CONTROL: usize = HOME_JUMP_ON;
+const LAST_CONTROL: usize = HOME_FPS_ON;
 /// Width of the small - and + buttons.
 const STEP_W: f32 = 26.0;
 /// The highlight fix's Off / On button, beside its - and + buttons.
@@ -273,17 +341,21 @@ const HIGHLIGHT_W: f32 = SETTINGS_W - 20.0 - 2.0 * (STEP_W + 4.0);
 // Layout. Settings positions are relative to the settings column, colour positions to the
 // colour column.
 const EDIT_Y: f32 = 31.0;
-/// The start page: the two page buttons and the menu key.
+/// The start page: a button for each page, then the menu key. Nine buttons and the Menu
+/// section just fill the card's height.
 const HOME_BLOCK_Y: f32 = 34.0;
-const HOME_MOB_Y: f32 = 64.0;
-const HOME_COUNTER_Y: f32 = 94.0;
-const HOME_CPS_Y: f32 = 124.0;
-const HOME_ZOOM_Y: f32 = 154.0;
-const HOME_LIGHT_Y: f32 = 184.0;
-const HOME_JUMP_Y: f32 = 214.0;
-const HOME_BUTTON_H: f32 = 28.0;
+const HOME_PITCH: f32 = 25.0;
+const HOME_MOB_Y: f32 = HOME_BLOCK_Y + HOME_PITCH;
+const HOME_COUNTER_Y: f32 = HOME_MOB_Y + HOME_PITCH;
+const HOME_CPS_Y: f32 = HOME_COUNTER_Y + HOME_PITCH;
+const HOME_FPS_Y: f32 = HOME_CPS_Y + HOME_PITCH;
+const HOME_ZOOM_Y: f32 = HOME_FPS_Y + HOME_PITCH;
+const HOME_LIGHT_Y: f32 = HOME_ZOOM_Y + HOME_PITCH;
+const HOME_JUMP_Y: f32 = HOME_LIGHT_Y + HOME_PITCH;
+const HOME_CROSS_Y: f32 = HOME_JUMP_Y + HOME_PITCH;
+const HOME_BUTTON_H: f32 = 23.0;
 /// Below the page buttons: a Menu section.
-const HOME_MENU_CAPTION_Y: f32 = HOME_JUMP_Y + HOME_BUTTON_H + 12.0;
+const HOME_MENU_CAPTION_Y: f32 = HOME_CROSS_Y + HOME_BUTTON_H + 9.0;
 const HOME_KEY_Y: f32 = HOME_MENU_CAPTION_Y + 14.0;
 /// The mob page has no Fill row, so its options sit one row higher.
 const MOB_OPTIONS_SHIFT: f32 = ROW_STEP;
@@ -306,6 +378,12 @@ const CPS_CAPTION_Y: f32 = CPS_ZEROS_Y + ROW_PITCH + SECTION_GAP;
 const CPS_MOVE_Y: f32 = CPS_CAPTION_Y + 14.0;
 const CPS_SIZE_Y: f32 = CPS_MOVE_Y + ROW_PITCH;
 const CPS_RESET_Y: f32 = CPS_SIZE_Y + ROW_PITCH;
+/// The FPS counter page's rows.
+const FPS_ON_Y: f32 = 34.0;
+const FPS_CAPTION_Y: f32 = FPS_ON_Y + ROW_PITCH + SECTION_GAP;
+const FPS_MOVE_Y: f32 = FPS_CAPTION_Y + 14.0;
+const FPS_SIZE_Y: f32 = FPS_MOVE_Y + ROW_PITCH;
+const FPS_RESET_Y: f32 = FPS_SIZE_Y + ROW_PITCH;
 /// The Lighting page's rows.
 const LIGHT_ON_Y: f32 = 34.0;
 const LIGHT_KEY_Y: f32 = LIGHT_ON_Y + ROW_PITCH;
@@ -320,6 +398,29 @@ const JUMP_NOTE: [&str; 3] = [
     "Shows early or late by the crosshair",
     "and whether you took knockback.",
 ];
+/// The Crosshair page's rows, below its colour button: the shape section, then the options.
+const CROSS_STYLE_Y: f32 = ROW_Y;
+const CROSS_LENGTH_Y: f32 = CROSS_STYLE_Y + ROW_PITCH;
+const CROSS_THICK_Y: f32 = CROSS_LENGTH_Y + ROW_PITCH;
+const CROSS_GAP_Y: f32 = CROSS_THICK_Y + ROW_PITCH;
+const CROSS_OPTIONS_CAPTION_Y: f32 = CROSS_GAP_Y + ROW_PITCH + SECTION_GAP;
+const CROSS_OPACITY_Y: f32 = CROSS_OPTIONS_CAPTION_Y + 14.0;
+const CROSS_TOGGLES_Y: f32 = CROSS_OPACITY_Y + ROW_PITCH;
+const CROSS_RESET_Y: f32 = CROSS_TOGGLES_Y + ROW_PITCH;
+/// The drawing view: the grid's top-left corner and side, then a line of help and the Mirror
+/// and Clear buttons under it. Each of the grid's pixels is a square `DRAW_GRID[2]` divided by
+/// the drawing's resolution wide.
+const DRAW_GRID: [f32; 3] = [
+    (SETTINGS_W - crate::crosshair::GRID_VIEW) / 2.0,
+    53.0,
+    crate::crosshair::GRID_VIEW,
+];
+const DRAW_NOTE_Y: f32 = DRAW_GRID[1] + DRAW_GRID[2] + 3.0;
+const DRAW_BUTTONS_Y: f32 = DRAW_NOTE_Y + 12.0;
+/// The top row's right half, beside the Colour button: Draw (on the page and in the colour
+/// tools), or the resolution with its - and + (in the drawing view).
+const TOP_RIGHT_X: f32 = 10.0 + HALF + 4.0;
+const RES_VALUE_W: f32 = HALF - 2.0 * (STEP_W + 4.0);
 /// The Zoom page's rows.
 const ZOOM_ON_Y: f32 = 34.0;
 const ZOOM_KEY_Y: f32 = ZOOM_ON_Y + ROW_PITCH;
@@ -347,13 +448,16 @@ pub const GUIDE_H: f32 = 68.0;
 /// hint line below them; the colour tools use the full height.
 pub(super) fn card_height(state: MenuState) -> f32 {
     match state.page {
-        _ if state.colour_open && state.page.outline() => CARD_H,
+        _ if state.colour_open && state.page.has_colour() => CARD_H,
+        Page::Crosshair if state.drawing => DRAW_BUTTONS_Y + BUTTON_H + CARD_FOOT,
         Page::Home => HOME_KEY_Y + BUTTON_H + CARD_FOOT + FUEL_LINE,
         Page::Counter => COUNTER_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Cps => CPS_RESET_Y + BUTTON_H + CARD_FOOT,
+        Page::Fps => FPS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Zoom => ZOOM_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Lighting => LIGHT_KEY_Y + BUTTON_H + CARD_FOOT,
         Page::JumpReset => JUMP_NOTE_Y + 12.0 * JUMP_NOTE.len() as f32 + CARD_FOOT,
+        Page::Crosshair => CROSS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Block => HIGHLIGHT_Y + BUTTON_H + CARD_FOOT,
         Page::Mob => BOTTOM_Y - MOB_OPTIONS_SHIFT + BUTTON_H + CARD_FOOT,
     }
@@ -423,8 +527,8 @@ const HOME_GAP: f32 = 4.0;
 /// The width of a start page button.
 const HOME_BUTTON_W: f32 = SETTINGS_W - 20.0 - HOME_SWITCH_W - HOME_GAP;
 /// What each start page button says under its name (Block, Mob, Counter, Zoom, CPS, Lighting,
-/// Jump reset).
-const HOME_ABOUT: [&str; 7] = [
+/// Jump reset, Crosshair).
+const HOME_ABOUT: [&str; 9] = [
     "The block you look at",
     "Mobs and players you look at",
     "Arrows left, on your HUD",
@@ -432,6 +536,8 @@ const HOME_ABOUT: [&str; 7] = [
     "Left/right clicks per second",
     "Fullbright for caves, nights",
     "Times your jump after a hit",
+    "Your own shape and colour",
+    "Frames per second, on your HUD",
 ];
 /// Settings sit in lighter inset panels, `SECTION_PAD` wider than their rows; the gap between two
 /// panels is `SECTION_GAP` more than the rows' own spacing.
@@ -450,7 +556,7 @@ const BADGE: f32 = 22.0;
 const TITLE_X: f32 = 8.0;
 const ACCENT: [f32; 4] = [0.66, 0.5, 0.97, 1.0];
 /// The switch rows: bound by `#<name>_bg` (pill colour) and `#<name>_knob` (knob position).
-const SWITCHES: [&str; 22] = [
+const SWITCHES: [&str; 28] = [
     "home_block",
     "home_mob",
     "home_counter",
@@ -471,8 +577,14 @@ const SWITCHES: [&str; 22] = [
     "cps_on",
     "cps_right",
     "cps_zeros",
+    "fps_on",
+    "home_fps",
     "home_jump",
     "jump_on",
+    "home_crosshair",
+    "crosshair_on",
+    "crosshair_outline",
+    "crosshair_mirror",
 ];
 /// The card's outline and the keyboard focus ring.
 const BORDER: [f32; 4] = [0.3, 0.31, 0.37, 1.0];
@@ -677,8 +789,71 @@ fn content_in(settings: &Settings, seconds: f32, state: MenuState) -> String {
         r#",{{"kind":"toggle","id":"home_jump","label":"Jump reset on","value":{}}}"#,
         settings.jump_reset.on
     );
+    let crosshair = settings.crosshair;
+    controls.push_str(r#",{"kind":"button","id":"open_crosshair","label":"Crosshair"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"home_crosshair","label":"Crosshair on","value":{}}}"#,
+        crosshair.on
+    );
+    controls.push_str(r#",{"kind":"button","id":"crosshair_colour","label":"Crosshair colour"}"#);
+    for (id, caption, _, _) in CROSS_VALUES {
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"Crosshair {}"}},{{"kind":"button","id":"{id}_less","label":"Less crosshair {}"}},{{"kind":"button","id":"{id}_more","label":"More crosshair {}"}}"#,
+            caption.to_lowercase(),
+            caption.to_lowercase(),
+            caption.to_lowercase()
+        );
+    }
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"crosshair_on","label":"Crosshair","value":{}}},{{"kind":"toggle","id":"crosshair_outline","label":"Crosshair outline","value":{}}}"#,
+        crosshair.on, crosshair.outline
+    );
+    controls.push_str(r#",{"kind":"button","id":"crosshair_reset","label":"Reset crosshair"}"#);
+    controls.push_str(r#",{"kind":"button","id":"crosshair_draw","label":"Draw your own"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"crosshair_mirror","label":"Mirror drawing","value":{}}}"#,
+        crosshair.mirror
+    );
+    controls.push_str(r#",{"kind":"button","id":"crosshair_clear","label":"Clear drawing"}"#);
+    for (id, label) in [
+        ("crosshair_res", "Drawing resolution"),
+        ("crosshair_res_less", "Fewer pixels"),
+        ("crosshair_res_more", "More pixels"),
+    ] {
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#
+        );
+    }
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"fps_on","label":"FPS counter","value":{}}}"#,
+        settings.fps.on
+    );
+    for (id, label) in [
+        ("fps_move", "Move and resize FPS"),
+        ("fps_size", "FPS size"),
+        ("fps_size_less", "Smaller FPS"),
+        ("fps_size_more", "Bigger FPS"),
+        ("fps_reset", "Reset FPS place"),
+    ] {
+        let _ = write!(
+            controls,
+            r#",{{"kind":"button","id":"{id}","label":"{label}"}}"#
+        );
+    }
+    controls.push_str(r#",{"kind":"button","id":"open_fps","label":"FPS counter"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"home_fps","label":"FPS counter on","value":{}}}"#,
+        settings.fps.on
+    );
     format!(
-        r#"{{"reference_size":[{},{}],"motion":true,"widget_colors":{{"background":[0.07,0.08,0.1,0.98],"surface":[0.2,0.21,0.24,1],"text":[0.92,0.93,0.95,1],"accent":[0.45,0.24,0.75,1],"border":[0.36,0.37,0.42,1]}},"controls":[{controls}],"surface":{{"screen":"block_outline.screen","document":{},"bindings":{}}}}}"#,
+        r#"{{"reference_size":[{},{}],"motion":true,"widget_colors":{{"background":[0.07,0.08,0.1,0.98],"surface":[0.2,0.21,0.24,1],"text":[0.92,0.93,0.95,1],"accent":[0.45,0.24,0.75,1],"border":[0.36,0.37,0.42,1]}},"controls":[{controls}],"surface":{{"screen":"bo.screen","document":{},"bindings":{}}}}}"#,
         // Shrinks the whole menu on windows too small for the card, with a small margin.
         SETTINGS_W + 16.0,
         CARD_H + 16.0,
@@ -715,7 +890,11 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     );
     // The arrow counter lives on the HUD, which the menu hides on its other pages.
     out.push_str(
-        if matches!(state.page, Page::Counter | Page::Cps | Page::JumpReset) || state.moving {
+        if matches!(
+            state.page,
+            Page::Counter | Page::Cps | Page::Fps | Page::JumpReset | Page::Crosshair
+        ) || state.moving
+        {
             r#""show_gameplay_hud":true,"#
         } else {
             r#""show_gameplay_hud":false,"#
@@ -761,14 +940,24 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     value(&mut out, CPS_ON, &boolean(settings.cps.on));
     value(&mut out, CPS_RIGHT, &boolean(settings.cps.right));
     value(&mut out, CPS_ZEROS, &boolean(settings.cps.zeros));
+    value(&mut out, FPS_ON, &boolean(settings.fps.on));
     value(&mut out, HOME_BLOCK_ON, &boolean(settings.block_on));
     value(&mut out, HOME_MOB_ON, &boolean(settings.mob_on));
     value(&mut out, HOME_COUNTER_ON, &boolean(settings.counter.on));
     value(&mut out, HOME_CPS_ON, &boolean(settings.cps.on));
+    value(&mut out, HOME_FPS_ON, &boolean(settings.fps.on));
     value(&mut out, HOME_ZOOM_ON, &boolean(settings.zoom.on));
     value(&mut out, HOME_LIGHT_ON, &boolean(settings.fullbright));
     value(&mut out, JUMP_ON, &boolean(settings.jump_reset.on));
     value(&mut out, HOME_JUMP_ON, &boolean(settings.jump_reset.on));
+    value(&mut out, HOME_CROSS_ON, &boolean(settings.crosshair.on));
+    value(&mut out, CROSS_ON, &boolean(settings.crosshair.on));
+    value(
+        &mut out,
+        CROSS_OUTLINE,
+        &boolean(settings.crosshair.outline),
+    );
+    value(&mut out, DRAW_MIRROR, &boolean(settings.crosshair.mirror));
     out.push_str(r#"],"binding_changes":"#);
     bindings_into(&mut out, settings, seconds, state);
     out.push('}');
@@ -803,16 +992,26 @@ fn swatches(out: &mut String, settings: &Settings, seconds: f32) {
     out.push_str(r##","#aim_swatch":"##);
     let [r, g, b] = settings.aim_rgb.map(|c| f32::from(c) / 255.0);
     vector(out, [r, g, b, 1.0]);
+    // The Crosshair page's colour button and the start page's crosshair icon.
+    let [r, g, b] = settings.crosshair.rgb.map(|c| f32::from(c) / 255.0);
+    out.push_str(r##","#crosshair_swatch":"##);
+    vector(out, [r, g, b, 1.0]);
+    out.push_str(r##","#open_crosshair_color":"##);
+    vector(out, [r, g, b, 1.0]);
 }
 
 /// Whether the colour tools' hex code and saved colours carry the line opacity: only for the
-/// line, the colour that owns it.
+/// line, the colour that owns it. (The crosshair's opacity is a value of its own.)
 fn edits_alpha(state: MenuState) -> bool {
-    !state.editing_fill && !state.editing_aim
+    !state.editing_fill && !state.editing_aim && state.page != Page::Crosshair
 }
 
-/// The colour the colour tools are editing: the fill's own colour, or the line colour.
+/// The colour the colour tools are editing: the crosshair's on its page, else the fill's own
+/// colour, the aimed mob's or the line colour.
 fn target_rgb(settings: &Settings, state: MenuState) -> [u8; 3] {
+    if state.page == Page::Crosshair {
+        return settings.crosshair.rgb;
+    }
     if state.editing_aim {
         return settings.aim_rgb;
     }
@@ -836,6 +1035,10 @@ fn target_hex(settings: &Settings, state: MenuState) -> String {
 /// Sets the edited colour. Editing the fill gives it its own colour; editing the line turns
 /// rainbow off, since a fixed colour was chosen.
 fn set_target_rgb(settings: &mut Settings, state: MenuState, rgb: [u8; 3]) {
+    if state.page == Page::Crosshair {
+        settings.crosshair.rgb = rgb;
+        return;
+    }
     if state.editing_aim {
         settings.aim_rgb = rgb;
         return;
@@ -884,6 +1087,41 @@ fn title(id: &str) -> &'static str {
         "width" => "Thickness",
         _ => "Fill",
     }
+}
+
+/// The drawing grid's pixel under `point` on the card, as (row, column), if any.
+pub fn draw_cell(point: [f32; 2], size: usize) -> Option<(usize, usize)> {
+    let [x, y, side] = DRAW_GRID;
+    let size = size.max(1);
+    let cell = side / size as f32;
+    let (dx, dy) = (point[0] - x, point[1] - y);
+    if !(dx >= 0.0 && dy >= 0.0 && dx < side && dy < side) {
+        return None;
+    }
+    let at = |d: f32| ((d / cell) as usize).min(size - 1);
+    Some((at(dy), at(dx)))
+}
+
+/// The drawing view's live parts: the pixels drawn, in the crosshair's colour, and the help line.
+fn draw_bindings(out: &mut String, _settings: &Settings, state: MenuState) {
+    // The grid itself is the HUD's `drawgrid`, which the menu embeds: a binding cannot hold
+    // its pixels.
+    out.push_str(r##""#draw_note_text":""##);
+    out.push_str(if state.draw_full {
+        "Too detailed: try fewer separate pixels"
+    } else {
+        "Left click draws, right click erases"
+    });
+    out.push('"');
+}
+
+/// A patch of only the drawing view's help line, sent when it changes while the player draws.
+pub fn draw_update(settings: &Settings, state: MenuState) -> String {
+    let mut out = String::with_capacity(900);
+    out.push_str(r#"{"binding_changes":{"#);
+    draw_bindings(&mut out, settings, state);
+    out.push_str("}}");
+    out
 }
 
 /// A patch of only the start page's fuel line. Runs in a frame callback, so it writes the

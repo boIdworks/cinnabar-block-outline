@@ -29,10 +29,33 @@ pub(super) fn rect(
 ) -> String {
     let mut colour = String::new();
     vector(&mut colour, color);
+    // The type, renderer and anchors come from the `r` template (see `document`): a rectangle
+    // written out in full is about 90 bytes longer, and the menu has well over a hundred.
     format!(
-        r#"{{"{name}":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":{size},"offset":[{},{}],"anchor_from":"top_left","anchor_to":"top_left","radius":3,"color":{colour}{extra}}}}}"#,
+        r#"{{"{name}@bo.r":{{"size":{size},"offset":[{},{}],"radius":3,"color":{colour}{extra}}}}}"#,
         offset[0], offset[1],
     )
+}
+
+/// The template every button's background inherits: a rounded rectangle filling the button in
+/// the track colour. The menu has close to a hundred of them, and writing each out in full would
+/// cost about 16 KiB of the host's 192 KiB limit on the document.
+fn bg_template() -> String {
+    let mut colour = String::new();
+    vector(&mut colour, TRACK);
+    format!(
+        r#""bg":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":["100%","100%"],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","radius":3,"color":{colour},"layer":1}}"#
+    )
+}
+
+/// A button's background, from [`bg_template`]; its colour follows the `binding` if one is given.
+pub(super) fn track_bg(binding: Option<&str>) -> String {
+    match binding {
+        Some(binding) => format!(
+            r##"{{"bg@bo.bg":{{"bindings":[{{"binding_name":"{binding}","binding_name_override":"#color"}}]}}}}"##
+        ),
+        None => String::from(r#"{"bg@bo.bg":{}}"#),
+    }
 }
 
 /// A label reading its text from `#<binding>`, or literal text.
@@ -106,15 +129,7 @@ fn bound_button(name: &str, area: [f32; 4], control: usize, middle: bool) -> Str
         area,
         &format!("mod.control:{control}"),
         &[
-            rect(
-                "bg",
-                r#"["100%","100%"]"#,
-                [0.0, 0.0],
-                TRACK,
-                &format!(
-                    r##","layer":1,"bindings":[{{"binding_name":"#{name}_bg","binding_name_override":"#color"}}]"##
-                ),
-            ),
+            track_bg(Some(&format!("#{name}_bg"))),
             if middle { centred(text) } else { text },
         ],
     )
@@ -135,13 +150,7 @@ pub(super) fn switch_button(name: &str, area: [f32; 4], control: usize, caption:
         area,
         &format!("mod.control:{control}"),
         &[
-            rect(
-                "bg",
-                r#"["100%","100%"]"#,
-                [0.0, 0.0],
-                TRACK,
-                r#","layer":1"#,
-            ),
+            track_bg(None),
             label(
                 "text",
                 caption,
@@ -232,13 +241,7 @@ pub(super) fn plain_button(name: &str, area: [f32; 4], control: usize, caption: 
         area,
         &format!("mod.control:{control}"),
         &[
-            rect(
-                "bg",
-                r#"["100%","100%"]"#,
-                [0.0, 0.0],
-                TRACK,
-                r#","layer":1"#,
-            ),
+            track_bg(None),
             centred(label(
                 "text",
                 caption,
@@ -390,7 +393,7 @@ pub(super) fn wheel() -> String {
         let [r, g, b] = hsv_to_rgb(hue, distance, 1.0).map(|c| short(f32::from(c) / 255.0));
         let name = children.len();
         children.push(format!(
-            r#"{{"c{name}@block_outline.{template}":{{"offset":[{},{}],"color":[{r},{g},{b},1]}}}}"#,
+            r#"{{"c{name}@bo.{template}":{{"offset":[{},{}],"color":[{r},{g},{b},1]}}}}"#,
             // Anchored at the centre, as every control is by default, which saves the two
             // anchor fields on each of the wheel's several hundred cells.
             column * WHEEL_CELL - side / 2.0,
@@ -520,6 +523,24 @@ pub(super) fn top_controls() -> Vec<String> {
                     )],
                 ),
                 shown_when(
+                    "crosshair_top",
+                    &[edit_button(
+                        "crosshair_colour",
+                        [10.0, EDIT_Y, HALF, BUTTON_H],
+                        CROSS_COLOUR,
+                        "#crosshair_swatch",
+                    )],
+                ),
+                shown_when(
+                    "crosshair_draw_button",
+                    &[plain_button(
+                        "crosshair_draw",
+                        [TOP_RIGHT_X, EDIT_Y, HALF, BUTTON_H],
+                        CROSS_DRAW,
+                        "Draw your own",
+                    )],
+                ),
+                shown_when(
                     "mob_top",
                     &[
                         edit_button(
@@ -559,13 +580,7 @@ pub(super) fn home_controls() -> Vec<String> {
         |name: &str, y: f32, control: usize, icon: usize, title: &str, about: &str| {
             let badge = (HOME_BUTTON_H - BADGE) / 2.0;
             let mut children = vec![
-                rect(
-                    "bg",
-                    r#"["100%","100%"]"#,
-                    [0.0, 0.0],
-                    TRACK,
-                    r#","layer":1"#,
-                ),
+                track_bg(None),
                 // A dark tile with the page's icon on it, drawn in the page's current colour.
                 rect(
                     "badge",
@@ -577,25 +592,27 @@ pub(super) fn home_controls() -> Vec<String> {
                 .replace(r#""radius":3"#, r#""radius":6"#),
             ];
             children.extend(home_icon(name, icon, badge));
+            // The name and the line under it, centred together on the button.
+            let name_y = ((HOME_BUTTON_H - 21.5) / 2.0).floor();
             children.push(label(
                 "name",
                 title,
                 [HOME_BUTTON_W - 46.0, 10.0],
-                [badge * 2.0 + BADGE, 3.5],
+                [BADGE + 8.0, name_y],
                 TEXT,
             ));
             children.push(label(
                 "about",
                 about,
                 [HOME_BUTTON_W - 46.0, 10.0],
-                [badge * 2.0 + BADGE, 15.0],
+                [BADGE + 8.0, name_y + 11.5],
                 DIM,
             ));
             children.push(label(
                 "arrow",
                 ">",
                 [10.0, 10.0],
-                [HOME_BUTTON_W - 14.0, 9.0],
+                [HOME_BUTTON_W - 14.0, text_y(HOME_BUTTON_H)],
                 TEXT,
             ));
             button(
@@ -639,6 +656,14 @@ pub(super) fn home_controls() -> Vec<String> {
             HOME_ABOUT[4],
         ),
         page_button(
+            "open_fps",
+            HOME_FPS_Y,
+            OPEN_FPS,
+            8,
+            "FPS counter",
+            HOME_ABOUT[8],
+        ),
+        page_button(
             "open_zoom",
             HOME_ZOOM_Y,
             OPEN_ZOOM,
@@ -666,9 +691,19 @@ pub(super) fn home_controls() -> Vec<String> {
         home_switch("home_mob", HOME_MOB_Y, HOME_MOB_ON),
         home_switch("home_counter", HOME_COUNTER_Y, HOME_COUNTER_ON),
         home_switch("home_cps", HOME_CPS_Y, HOME_CPS_ON),
+        home_switch("home_fps", HOME_FPS_Y, HOME_FPS_ON),
         home_switch("home_zoom", HOME_ZOOM_Y, HOME_ZOOM_ON),
         home_switch("home_light", HOME_LIGHT_Y, HOME_LIGHT_ON),
+        page_button(
+            "open_crosshair",
+            HOME_CROSS_Y,
+            OPEN_CROSS,
+            7,
+            "Crosshair",
+            HOME_ABOUT[7],
+        ),
         home_switch("home_jump", HOME_JUMP_Y, HOME_JUMP_ON),
+        home_switch("home_crosshair", HOME_CROSS_Y, HOME_CROSS_ON),
         caption("menu_caption", "Menu", HOME_MENU_CAPTION_Y),
         label(
             "key_title",
@@ -718,16 +753,7 @@ fn home_switch(name: &str, y: f32, control: usize) -> String {
             HOME_BUTTON_H,
         ],
         &format!("mod.control:{control}"),
-        &[
-            rect(
-                "bg",
-                r#"["100%","100%"]"#,
-                [0.0, 0.0],
-                TRACK,
-                r#","layer":1"#,
-            ),
-            pill,
-        ],
+        &[track_bg(None), pill],
     )
 }
 
@@ -794,12 +820,26 @@ fn home_icon(name: &str, kind: usize, at: f32) -> Vec<String> {
             piece("i5", 10.0, 6.0, 2.0, 10.0, 0.5, true, 3),
             piece("i6", 5.0, 18.0, 12.0, 1.5, 0.5, true, 3),
         ],
+        // A crosshair: four short lines round a dot.
+        7 => vec![
+            piece("i0", 10.0, 3.0, 2.0, 5.0, 0.5, true, 3),
+            piece("i1", 10.0, 14.0, 2.0, 5.0, 0.5, true, 3),
+            piece("i2", 3.0, 10.0, 5.0, 2.0, 0.5, true, 3),
+            piece("i3", 14.0, 10.0, 5.0, 2.0, 0.5, true, 3),
+            piece("i4", 10.0, 10.0, 2.0, 2.0, 0.5, true, 3),
+        ],
         // A mouse: an outlined body with the button split.
         4 => vec![
             piece("i0", 6.0, 3.0, 10.0, 16.0, 5.0, true, 3),
             piece("i1", 7.5, 4.5, 7.0, 13.0, 3.5, false, 4),
             piece("i2", 10.5, 4.5, 1.0, 5.0, 0.0, true, 5),
             piece("i3", 7.5, 9.5, 7.0, 1.0, 0.0, true, 5),
+        ],
+        // Three bars rising to the right: frames per second.
+        8 => vec![
+            piece("i0", 4.0, 12.0, 3.0, 6.0, 0.5, true, 3),
+            piece("i1", 9.5, 8.0, 3.0, 10.0, 0.5, true, 3),
+            piece("i2", 15.0, 4.0, 3.0, 14.0, 0.5, true, 3),
         ],
         // A magnifier: a ring and a handle.
         _ => vec![
@@ -888,7 +928,7 @@ pub(super) fn lighting_controls() -> Vec<String> {
     ]
 }
 
-/// The CPS page: on/off, right clicks, moving, size and reset.
+/// The CPS page: on/off, right clicks, leading zeros, moving, size and reset.
 pub(super) fn cps_controls() -> Vec<String> {
     let full = SETTINGS_W - 20.0;
     let mut page = vec![
@@ -933,6 +973,39 @@ pub(super) fn cps_controls() -> Vec<String> {
     page
 }
 
+/// The FPS counter page: on/off, moving, size and reset.
+pub(super) fn fps_controls() -> Vec<String> {
+    let full = SETTINGS_W - 20.0;
+    let mut page = vec![
+        switch_button(
+            "fps_on",
+            [10.0, FPS_ON_Y, full, BUTTON_H],
+            FPS_ON,
+            "Show FPS",
+        ),
+        caption("fps_caption", "Place", FPS_CAPTION_Y),
+        plain_button(
+            "fps_move",
+            [10.0, FPS_MOVE_Y, full, BUTTON_H],
+            FPS_MOVE,
+            "Move and resize on screen",
+        ),
+    ];
+    page.extend(stepper(
+        "fps_size",
+        FPS_SIZE_Y,
+        FPS_SIZE,
+        FPS_SMALLER,
+        FPS_BIGGER,
+    ));
+    page.push(action_button(
+        "fps_reset",
+        [10.0, FPS_RESET_Y, full, BUTTON_H],
+        FPS_RESET,
+    ));
+    page
+}
+
 /// The Jump reset page: on/off, the perfect window and a short note.
 pub(super) fn jump_controls() -> Vec<String> {
     let mut page = vec![
@@ -960,6 +1033,92 @@ pub(super) fn jump_controls() -> Vec<String> {
             DIM,
         ));
     }
+    page
+}
+
+/// The Crosshair page's settings, below its colour button: the shape's values, then opacity,
+/// the switches and reset.
+pub(super) fn crosshair_controls() -> Vec<String> {
+    let right = 10.0 + HALF + 4.0;
+    let mut page = vec![
+        caption("crosshair_shape_caption", "Shape", LOOK_CAPTION_Y),
+        caption(
+            "crosshair_options_caption",
+            "Options",
+            CROSS_OPTIONS_CAPTION_Y,
+        ),
+    ];
+    for (name, _, control, y) in CROSS_VALUES {
+        page.extend(stepper(name, y, control, control + 1, control + 2));
+    }
+    page.push(switch_button(
+        "crosshair_on",
+        [10.0, CROSS_TOGGLES_Y, HALF, BUTTON_H],
+        CROSS_ON,
+        "Show",
+    ));
+    page.push(switch_button(
+        "crosshair_outline",
+        [right, CROSS_TOGGLES_Y, HALF, BUTTON_H],
+        CROSS_OUTLINE,
+        "Outline",
+    ));
+    page.push(action_button(
+        "crosshair_reset",
+        [10.0, CROSS_RESET_Y, SETTINGS_W - 20.0, BUTTON_H],
+        CROSS_RESET,
+    ));
+    page
+}
+
+/// The drawing view: the grid (the HUD's `drawgrid`, embedded), a line of help, and Mirror
+/// beside Clear.
+pub(super) fn draw_controls() -> Vec<String> {
+    let [x, y, side] = DRAW_GRID;
+    let right = 10.0 + HALF + 4.0;
+    let mut page = vec![
+        // The HUD's `drawgrid`, at its own size: the mod replaces it as the player draws.
+        format!(
+            r##"{{"draw_grid":{{"type":"custom","renderer":"cinnabar_hud_control","control":"drawgrid","size":[{side},{side}],"offset":[{x},{y}],"anchor_from":"top_left","anchor_to":"top_left","layer":1}}}}"##
+        ),
+        label(
+            "draw_note",
+            "#draw_note_text",
+            [SETTINGS_W - 20.0, 10.0],
+            [10.0, DRAW_NOTE_Y],
+            DIM,
+        ),
+        switch_button(
+            "crosshair_mirror",
+            [10.0, DRAW_BUTTONS_Y, HALF, BUTTON_H],
+            DRAW_MIRROR,
+            "Mirror",
+        ),
+        action_button(
+            "crosshair_clear",
+            [right, DRAW_BUTTONS_Y, HALF, BUTTON_H],
+            DRAW_CLEAR,
+        ),
+    ];
+    // The resolution, beside the Colour button.
+    let less_x = TOP_RIGHT_X + RES_VALUE_W + 4.0;
+    page.push(value_button(
+        "crosshair_res",
+        [TOP_RIGHT_X, EDIT_Y, RES_VALUE_W, BUTTON_H],
+        DRAW_RES,
+    ));
+    page.push(plain_button(
+        "crosshair_res_less",
+        [less_x, EDIT_Y, STEP_W, BUTTON_H],
+        DRAW_RES + 1,
+        "-",
+    ));
+    page.push(plain_button(
+        "crosshair_res_more",
+        [less_x + STEP_W + 4.0, EDIT_Y, STEP_W, BUTTON_H],
+        DRAW_RES + 2,
+        "+",
+    ));
     page
 }
 
@@ -1410,6 +1569,13 @@ fn sections() -> String {
             section("place", CPS_CAPTION_Y - pad, row_end(CPS_RESET_Y)),
         ],
     ));
+    let fps = behind(shown_when(
+        "fps_page",
+        &[
+            section("display", EDIT_Y - pad, row_end(FPS_ON_Y)),
+            section("place", FPS_CAPTION_Y - pad, row_end(FPS_RESET_Y)),
+        ],
+    ));
     let light = behind(shown_when(
         "light_page",
         &[section("lighting", EDIT_Y - pad, row_end(LIGHT_KEY_Y))],
@@ -1419,6 +1585,17 @@ fn sections() -> String {
         &[
             section("display", EDIT_Y - pad, row_end(JUMP_ON_Y)),
             section("timing", JUMP_CAPTION_Y - pad, row_end(JUMP_WINDOW_Y)),
+        ],
+    ));
+    let crosshair = behind(shown_when(
+        "crosshair_page",
+        &[
+            section("shape", LOOK_CAPTION_Y - pad, row_end(CROSS_GAP_Y)),
+            section(
+                "options",
+                CROSS_OPTIONS_CAPTION_Y - pad,
+                row_end(CROSS_RESET_Y),
+            ),
         ],
     ));
     let zoom = behind(shown_when(
@@ -1449,7 +1626,9 @@ fn sections() -> String {
             row_end(HOME_KEY_Y),
         )],
     ));
-    format!("{block},{mob},{counter},{cps},{zoom},{light},{jump},{colour},{home}")
+    format!(
+        "{block},{mob},{counter},{cps},{fps},{zoom},{light},{jump},{crosshair},{colour},{home}"
+    )
 }
 
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned
@@ -1510,9 +1689,12 @@ pub(super) fn document() -> String {
         ),
         shown_when("counter_page", &counter_controls()),
         shown_when("cps_page", &cps_controls()),
+        shown_when("fps_page", &fps_controls()),
         shown_when("zoom_page", &zoom_controls()),
         shown_when("light_page", &lighting_controls()),
         shown_when("jump_page", &jump_controls()),
+        shown_when("crosshair_page", &crosshair_controls()),
+        shown_when("draw_page", &draw_controls()),
         // Hover help: hidden until the mod shows it next to the pointer.
         format!(
             r##"{{"tip":{{"type":"panel","size":[{TIP_WIDTH},14],"offset":[0,0],"anchor_from":"top_left","anchor_to":"top_left","layer":20,"bindings":[{{"binding_name":"#tip_visible","binding_name_override":"#visible"}},{{"binding_name":"#tip_offset","binding_name_override":"#offset"}}],"controls":[{},{}]}}}}"##,
@@ -1521,8 +1703,9 @@ pub(super) fn document() -> String {
         ),
     ];
     format!(
-        r##"{{"namespace":"block_outline","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"bindings":[{{"binding_name":"#card_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}},{}]}},"cell":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_CELL_SIZE},{WHEEL_CELL_SIZE}],"radius":0,"layer":1}},"cell_q":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_QUARTER_SIZE},{WHEEL_QUARTER_SIZE}],"radius":0,"layer":1}}}}"##,
+        r##"{{"namespace":"bo","screen":{{"type":"screen","size":["100%","100%"],"controls":[{{"card":{{"type":"panel","size":[{SETTINGS_W},{CARD_H}],"anchor_from":"right_middle","anchor_to":"right_middle","offset":[-{SCREEN_MARGIN},0],"bindings":[{{"binding_name":"#card_visible","binding_name_override":"#visible"}}],"controls":[{}]}}}},{}]}},{},"r":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","anchor_from":"top_left","anchor_to":"top_left"}},"cell":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_CELL_SIZE},{WHEEL_CELL_SIZE}],"radius":0,"layer":1}},"cell_q":{{"type":"custom","renderer":"cinnabar_rounded_rectangle","size":[{WHEEL_QUARTER_SIZE},{WHEEL_QUARTER_SIZE}],"radius":0,"layer":1}}}}"##,
         card.join(","),
-        moving_guides()
+        moving_guides(),
+        bg_template()
     )
 }

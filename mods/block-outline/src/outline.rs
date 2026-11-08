@@ -45,8 +45,11 @@ pub struct Settings {
     pub zoom: crate::zoom::Zoom,
     /// The clicks-per-second readout, set on the menu's Arrow counter page.
     pub cps: crate::cps::Cps,
+    pub fps: crate::fps::Fps,
     /// The jump reset timing readout, set on the menu's Jump reset page.
     pub jump_reset: crate::jumpreset::JumpReset,
+    /// The custom crosshair, set on the menu's Crosshair page.
+    pub crosshair: crate::crosshair::Crosshair,
     /// Whether the block outline is drawn; switched on the menu's start page.
     pub block_on: bool,
     /// Whether mob hitboxes are drawn; switched on the menu's start page.
@@ -192,11 +195,59 @@ impl Default for Settings {
             counter: crate::counter::Counter::default(),
             zoom: crate::zoom::Zoom::default(),
             cps: crate::cps::Cps::default(),
+            fps: crate::fps::Fps::default(),
             jump_reset: crate::jumpreset::JumpReset::default(),
+            crosshair: crate::crosshair::DEFAULT,
             block_on: true,
             mob_on: true,
         }
     }
+}
+
+/// The crosshair settings in settings JSON, with defaults for anything missing or unusable.
+fn parse_crosshair(json: &Fields) -> crate::crosshair::Crosshair {
+    use crate::crosshair::{self, GAP, LENGTH, THICKNESS};
+    let mut out = crosshair::DEFAULT;
+    if let Some(on) = bool_field(json, "crosshair") {
+        out.on = on;
+    }
+    if let Some(style) = string_field(json, "crosshair_style").and_then(crosshair::style_from_key) {
+        out.style = style;
+    }
+    if let Some([r, g, b, _]) = string_field(json, "crosshair_color").and_then(parse_color) {
+        out.rgb = [r, g, b];
+    }
+    if let Some(opacity) = number_field(json, "crosshair_opacity") {
+        out.opacity = crosshair::clamp_opacity(opacity);
+    }
+    if let Some(length) = number_field(json, "crosshair_length") {
+        out.length = LENGTH.clamp(length);
+    }
+    if let Some(thickness) = number_field(json, "crosshair_thickness") {
+        out.thickness = THICKNESS.clamp(thickness);
+    }
+    if let Some(gap) = number_field(json, "crosshair_gap") {
+        out.gap = GAP.clamp(gap);
+    }
+    if let Some(outline) = bool_field(json, "crosshair_outline") {
+        out.outline = outline;
+    }
+    // The resolution first: the drawing is read at it. Older files had none, and a 15 by 15
+    // drawing, which is read into the smallest grid.
+    let size = number_field(json, "crosshair_resolution")
+        .map_or(crosshair::RESOLUTIONS[0], |size| {
+            size.round().clamp(0.0, 255.0) as u8
+        });
+    if let Some(text) = string_field(json, "crosshair_pixels") {
+        out.pixels = crosshair::Drawing::parse(text, size);
+    }
+    if let Some(pixel) = number_field(json, "crosshair_pixel_size") {
+        out.pixel_size = crosshair::clamp_pixel_size(pixel);
+    }
+    if let Some(mirror) = bool_field(json, "crosshair_mirror") {
+        out.mirror = mirror;
+    }
+    out
 }
 
 /// One-click colours offered by the menu.
@@ -217,6 +268,11 @@ impl Settings {
     /// Reads settings JSON, keeping defaults for missing or invalid fields. A legacy
     /// `"color": "rainbow"` turns rainbow on.
     pub fn parse(json: &str) -> Self {
+        Self::from_fields(&Fields::new(json))
+    }
+
+    /// [`Settings::parse`] for a file already split into its fields.
+    pub fn from_fields(json: &Fields) -> Self {
         let mut settings = Self::default();
         match string_field(json, "color") {
             Some(text) if text.trim().eq_ignore_ascii_case("rainbow") => settings.rainbow = true,
@@ -378,6 +434,23 @@ impl Settings {
         if let Some(scale) = number_field(json, "cps_scale") {
             settings.cps.scale = crate::cps::clamp_scale(scale);
         }
+        if let Some(on) = bool_field(json, "fps") {
+            settings.fps.on = on;
+        }
+        if let (Some(x), Some(y)) = (number_field(json, "fps_x"), number_field(json, "fps_y")) {
+            use crate::counter::{Anchor, Pos};
+            let anchor = |key| string_field(json, key).and_then(Anchor::from_name);
+            if let (Some(ax), Some(ay)) = (anchor("fps_anchor_x"), anchor("fps_anchor_y")) {
+                settings.fps.pos = Pos {
+                    anchor: [ax, ay],
+                    off: [x, y],
+                }
+                .sanitised();
+            }
+        }
+        if let Some(scale) = number_field(json, "fps_scale") {
+            settings.fps.scale = crate::cps::clamp_scale(scale);
+        }
         if let Some(on) = bool_field(json, "jump_reset") {
             settings.jump_reset.on = on;
         }
@@ -394,6 +467,7 @@ impl Settings {
         if let Some(log) = string_field(json, "jump_reset_log") {
             settings.jump_reset.log = crate::jumpreset::Log::parse(log);
         }
+        settings.crosshair = parse_crosshair(json);
         settings
     }
 
@@ -485,6 +559,18 @@ impl Settings {
             format!("\"{}\"", self.cps.pos.anchor[1].name()),
         );
         field("cps_scale", self.cps.scale.to_string());
+        field("fps", self.fps.on.to_string());
+        field("fps_x", self.fps.pos.off[0].to_string());
+        field("fps_y", self.fps.pos.off[1].to_string());
+        field(
+            "fps_anchor_x",
+            format!("\"{}\"", self.fps.pos.anchor[0].name()),
+        );
+        field(
+            "fps_anchor_y",
+            format!("\"{}\"", self.fps.pos.anchor[1].name()),
+        );
+        field("fps_scale", self.fps.scale.to_string());
         field("jump_reset", self.jump_reset.on.to_string());
         field("jump_reset_window", self.jump_reset.window.to_string());
         field("jump_reset_carry", self.jump_reset.knockback.to_string());
@@ -492,6 +578,29 @@ impl Settings {
             "jump_reset_log",
             format!("\"{}\"", self.jump_reset.log.to_text()),
         );
+        let crosshair = &self.crosshair;
+        field("crosshair", crosshair.on.to_string());
+        field(
+            "crosshair_style",
+            format!("\"{}\"", crate::crosshair::style_key(crosshair.style)),
+        );
+        let [r, g, b] = crosshair.rgb;
+        field(
+            "crosshair_color",
+            format!("\"{}\"", hex_code([r, g, b, 255])),
+        );
+        field("crosshair_opacity", crosshair.opacity.to_string());
+        field("crosshair_length", crosshair.length.to_string());
+        field("crosshair_thickness", crosshair.thickness.to_string());
+        field("crosshair_gap", crosshair.gap.to_string());
+        field("crosshair_outline", crosshair.outline.to_string());
+        field("crosshair_resolution", crosshair.pixels.size().to_string());
+        field(
+            "crosshair_pixels",
+            format!("\"{}\"", crosshair.pixels.text()),
+        );
+        field("crosshair_pixel_size", crosshair.pixel_size.to_string());
+        field("crosshair_mirror", crosshair.mirror.to_string());
         field("menu_key", format!("\"{}\"", self.menu_key.as_str()));
         out.truncate(out.len() - 2);
         out.push_str(
@@ -517,7 +626,9 @@ impl Settings {
             counter: self.counter,
             zoom: self.zoom,
             cps: self.cps,
+            fps: self.fps,
             jump_reset: self.jump_reset,
+            crosshair: self.crosshair,
             block_on: self.block_on,
             mob_on: self.mob_on,
             ..Self::default()
@@ -729,32 +840,136 @@ fn hue_to_rgb(hue: f32) -> [f32; 3] {
     }
 }
 
-/// The text after `"key"` and its colon, for a flat JSON object.
-fn field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let quoted = format!("\"{key}\"");
-    let mut rest = json;
-    while let Some(at) = rest.find(&quoted) {
-        let after = rest[at + quoted.len()..].trim_start();
-        if let Some(value) = after.strip_prefix(':') {
-            return Some(value.trim_start());
+/// A flat JSON object read in one pass: each key and where its value starts. Looking a key up
+/// scans the text again for every key, and a settings file has about ninety keys and grows with
+/// the logs it keeps, which once cost more fuel than `init` is given; this reads the file once and
+/// builds no strings.
+pub struct Fields<'a> {
+    json: &'a str,
+    entries: Vec<Entry<'a>>,
+    /// Where the last lookup hit. Settings are read in the order they are written, so the next
+    /// key asked for is nearly always the next entry.
+    next: std::cell::Cell<usize>,
+}
+
+/// One key of a [`Fields`]: where its value starts, and for a text value where the text ends.
+#[derive(Clone, Copy)]
+struct Entry<'a> {
+    key: &'a str,
+    value: usize,
+    /// The offset of the closing quote when the value is text.
+    text_end: Option<usize>,
+}
+
+/// The offset of the first `"` in `bytes` at or after `from`. Eight bytes at a time: this runs
+/// over the whole settings file at start, most of it long text, and `str::find` costs about
+/// thirteen fuel a byte there.
+fn find_quote(bytes: &[u8], from: usize) -> Option<usize> {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    let mut rest = bytes.get(from..)?;
+    let mut at = from;
+    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
+        let word = u64::from_le_bytes(*word) ^ (ONES * u64::from(b'"'));
+        // A byte of `word` is zero where `bytes` has a quote, and this marks the first one (the
+        // bytes above it may be marked wrongly, never the ones below).
+        let marks = word.wrapping_sub(ONES) & !word & (ONES << 7);
+        if marks != 0 {
+            return Some(at + (marks.trailing_zeros() / 8) as usize);
         }
-        rest = &rest[at + quoted.len()..];
+        rest = tail;
+        at += 8;
     }
-    None
+    // Fewer than eight bytes left.
+    rest.iter()
+        .position(|&byte| byte == b'"')
+        .map(|offset| at + offset)
+}
+
+impl<'a> Fields<'a> {
+    /// Finds the keys of `json`: a quoted string followed by a colon.
+    pub fn new(json: &'a str) -> Self {
+        let bytes = json.as_bytes();
+        let mut entries = Vec::with_capacity(96);
+        let mut at = 0;
+        while let Some(open) = find_quote(bytes, at) {
+            let start = open + 1;
+            let Some(end) = find_quote(bytes, start) else {
+                break;
+            };
+            at = end + 1;
+            let mut value = at;
+            while bytes.get(value).is_some_and(u8::is_ascii_whitespace) {
+                value += 1;
+            }
+            if bytes.get(value) != Some(&b':') {
+                // A text value, not a key.
+                continue;
+            }
+            value += 1;
+            while bytes.get(value).is_some_and(u8::is_ascii_whitespace) {
+                value += 1;
+            }
+            // A text value is passed over now, so it is not read as a key and not found again.
+            let text_end = if bytes.get(value) == Some(&b'"') {
+                find_quote(bytes, value + 1)
+            } else {
+                None
+            };
+            entries.push(Entry {
+                key: &json[start..end],
+                value,
+                text_end,
+            });
+            at = text_end.map_or(value, |close| close + 1);
+        }
+        Self {
+            json,
+            entries,
+            next: std::cell::Cell::new(0),
+        }
+    }
+
+    /// The first entry named `key` at or after the last hit.
+    fn entry(&self, key: &str) -> Option<Entry<'a>> {
+        let count = self.entries.len();
+        let from = self.next.get();
+        for step in 0..count {
+            let mut index = from + step;
+            if index >= count {
+                index -= count;
+            }
+            let entry = self.entries[index];
+            if entry.key == key {
+                self.next.set(index + 1);
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    /// The text from `key`'s value on.
+    fn get(&self, key: &str) -> Option<&'a str> {
+        Some(&self.json[self.entry(key)?.value..])
+    }
+
+    /// Where `key`'s text value lies in the file, without its quotes.
+    pub fn text_span(&self, key: &str) -> Option<std::ops::Range<usize>> {
+        let entry = self.entry(key)?;
+        Some(entry.value + 1..entry.text_end?)
+    }
 }
 
 /// The text value of `key` in a settings file, for extras the settings do not hold.
-pub fn text_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    string_field(json, key)
+pub fn text_field<'a>(fields: &Fields<'a>, key: &str) -> Option<&'a str> {
+    string_field(fields, key)
 }
 
-fn string_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let value = field(json, key)?.strip_prefix('"')?;
-    Some(&value[..value.find('"')?])
+fn string_field<'a>(fields: &Fields<'a>, key: &str) -> Option<&'a str> {
+    fields.json.get(fields.text_span(key)?)
 }
 
-fn bool_field(json: &str, key: &str) -> Option<bool> {
-    let value = field(json, key)?;
+fn bool_field(fields: &Fields, key: &str) -> Option<bool> {
+    let value = fields.get(key)?;
     if value.starts_with("true") {
         Some(true)
     } else if value.starts_with("false") {
@@ -764,8 +979,8 @@ fn bool_field(json: &str, key: &str) -> Option<bool> {
     }
 }
 
-fn number_field(json: &str, key: &str) -> Option<f32> {
-    let value = field(json, key)?;
+fn number_field(fields: &Fields, key: &str) -> Option<f32> {
+    let value = fields.get(key)?;
     let end = value
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')))
         .unwrap_or(value.len());
@@ -1641,6 +1856,14 @@ mod tests {
                 },
                 scale: 1.7,
             },
+            fps: crate::fps::Fps {
+                on: false,
+                pos: crate::counter::Pos {
+                    anchor: [crate::counter::Anchor::Centre, crate::counter::Anchor::End],
+                    off: [20.5, -30.0],
+                },
+                scale: 2.3,
+            },
             jump_reset: crate::jumpreset::JumpReset {
                 on: false,
                 window: 120,
@@ -1656,10 +1879,33 @@ mod tests {
                     log
                 },
             },
+            crosshair: crate::crosshair::Crosshair {
+                on: true,
+                style: 5,
+                rgb: [12, 200, 99],
+                opacity: 70,
+                length: 7.5,
+                thickness: 1.5,
+                gap: 0.0,
+                outline: false,
+                pixels: crate::crosshair::Drawing::parse("1/0/ffffffff/0/8001/0/100", 32),
+                pixel_size: 3,
+                mirror: false,
+            },
             block_on: false,
             mob_on: false,
         };
         assert_eq!(Settings::parse(&s.to_json()), s);
+        // Crosshair values typed by hand are put on a step and kept in bounds.
+        let crosshair = Settings::parse(
+            r#"{"crosshair_length": 99, "crosshair_gap": 1.3, "crosshair_opacity": 3, "crosshair_style": "dot"}"#,
+        )
+        .crosshair;
+        assert_eq!(crosshair.length, crate::crosshair::LENGTH.max);
+        assert_eq!(crosshair.gap, 1.5);
+        assert_eq!(crosshair.opacity, crate::crosshair::MIN_OPACITY);
+        assert_eq!(crate::crosshair::style_name(crosshair.style), "Dot");
+        assert!(!crosshair.on, "off unless switched on");
         // A window typed by hand is rounded onto a step and kept in bounds.
         let typed = |window: &str| {
             Settings::parse(&format!(r#"{{"jump_reset_window": {window}}}"#))
@@ -2357,6 +2603,120 @@ mod tests {
         for edge in EDGES {
             let [start, _] = edge.unit_points();
             assert_eq!(edge.visible(min, max, [3.0; 3]), start != [0.0; 3]);
+        }
+    }
+
+    #[test]
+    fn fields_find_keys_in_any_order_and_ignore_text_values() {
+        let json = "{
+  \"a\": 1,
+ \"b\" :	\"two\",
+\"c\":true, \"d\":-0.5e1 ,\"text\": \"\\\"a\\\": x\"}";
+        let fields = Fields::new(json);
+        assert_eq!(number_field(&fields, "a"), Some(1.0));
+        assert_eq!(string_field(&fields, "b"), Some("two"));
+        assert_eq!(bool_field(&fields, "c"), Some(true));
+        // Out of the order they are written in, and more than once.
+        assert_eq!(number_field(&fields, "d"), Some(-5.0));
+        assert_eq!(number_field(&fields, "a"), Some(1.0));
+        assert_eq!(bool_field(&fields, "c"), Some(true));
+        // A missing key stays missing and leaves the others findable.
+        assert_eq!(number_field(&fields, "missing"), None);
+        assert_eq!(string_field(&fields, "b"), Some("two"));
+        // A key's name inside a text value is not a key.
+        let fields = Fields::new("{\"note\": \"color\", \"color\": \"#102030\"}");
+        assert_eq!(string_field(&fields, "color"), Some("#102030"));
+        // Wrong kinds and damaged text give nothing, never a panic.
+        assert_eq!(bool_field(&fields, "color"), None);
+        for broken in [
+            "",
+            "{",
+            "{\"a",
+            "{\"a\"",
+            "{\"a\":",
+            "\"",
+            "{\"a\": \"x",
+            "{\"é\": 1, \"b\": é}",
+        ] {
+            let fields = Fields::new(broken);
+            assert_eq!(number_field(&fields, "a"), None);
+            let _ = Settings::parse(broken);
+        }
+    }
+
+    #[test]
+    fn a_big_settings_file_reads_every_field() {
+        // Every field after a long log, in reverse order of writing too: the lookup cursor must
+        // not lose any of them.
+        let mut s = Settings {
+            width: 7.0,
+            reach: 6.1,
+            ..Settings::default()
+        };
+        s.zoom.level = 6.0;
+        let json = s.to_json();
+        assert_eq!(Settings::parse(&json), s);
+        let mut lines: Vec<&str> = json.lines().collect();
+        lines.reverse();
+        let reversed = format!(
+            "{{
+{}
+}}",
+            lines
+                .join(
+                    "
+"
+                )
+                .replace("{", "")
+                .replace("}", "")
+        );
+        assert_eq!(Settings::parse(&reversed), s);
+        let padded = format!(
+            "{{\"jump_reset_resets\": \"{}\",
+{}",
+            "9|1/".repeat(4000),
+            &json[1..]
+        );
+        assert_eq!(Settings::parse(&padded), s);
+        assert_eq!(
+            text_field(&Fields::new(&padded), "jump_reset_resets").map(str::len),
+            Some(16000)
+        );
+    }
+
+    #[test]
+    fn find_quote_agrees_with_a_plain_search() {
+        let text: Vec<u8> = (0..300u32)
+            .map(|n| match n % 11 {
+                3 | 7 => b'"',
+                _ => b'a' + (n % 26) as u8,
+            })
+            .collect();
+        for from in 0..=text.len() + 1 {
+            let plain = text
+                .get(from..)
+                .and_then(|rest| rest.iter().position(|&byte| byte == b'"'))
+                .map(|offset| from + offset);
+            assert_eq!(find_quote(&text, from), plain, "from {from}");
+        }
+        // Bytes that look like a quote's neighbours in the bit trick.
+        let tricky = [
+            0x22u8 ^ 1,
+            0x22 ^ 0x80,
+            0x23,
+            0x21,
+            0x22,
+            0xA2,
+            0x22,
+            0x22,
+            0x22,
+        ];
+        for from in 0..tricky.len() {
+            let plain = tricky[from..]
+                .iter()
+                .position(|&byte| byte == b'"')
+                .map(|o| from + o);
+            assert_eq!(find_quote(&tricky, from), plain);
         }
     }
 }

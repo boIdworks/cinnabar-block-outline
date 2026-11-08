@@ -669,11 +669,15 @@ macro_rules! escaped_const {
     };
 }
 
-/// The HUD document: the CPS readout first, behind the arrow counter, then the guide lines
-/// and the arrow counter.
+/// The HUD document: the crosshair, the CPS readout behind the arrow counter, then the guide
+/// lines and the arrow counter.
 pub(crate) const DOCUMENT: &str = concat!(
     r##"{"namespace":"boldy_hud","root":{"type":"panel","size":["100%","100%"],"controls":["##,
+    crate::crosshair::document!(),
+    ",",
     crate::cps::document!(),
+    ",",
+    crate::fps::document!(),
     ",",
     crate::jumpreset::document!(),
     ",",
@@ -702,7 +706,10 @@ pub(crate) const DOCUMENT: &str = concat!(
     r##"{"binding_name":"#arrows_text_offset","binding_name_override":"#offset"},"##,
     r##"{"binding_name":"#arrows_text_w","binding_name_override":"#size_binding_x_absolute"},"##,
     r##"{"binding_name":"#arrows_text_h","binding_name_override":"#size_binding_y_absolute"}]}}"##,
-    r##"]}}]}}"##,
+    r##"]}}]},"##,
+    // Definitions the root and the menu draw: the crosshair, and the menu's drawing grid.
+    crate::crosshair::definitions!(),
+    "}",
 );
 escaped_const!(DOCUMENT, DOCUMENT_ESCAPED);
 
@@ -794,7 +801,11 @@ pub fn surface() -> String {
     initial.push_str(r##","#arrow_item":{"item":{"identifier":"minecraft:arrow","metadata":0}},"##);
     initial.push_str(&crate::cps::initial_bindings());
     initial.push(',');
+    initial.push_str(&crate::fps::initial_bindings());
+    initial.push(',');
     initial.push_str(&crate::jumpreset::initial_bindings());
+    initial.push(',');
+    initial.push_str(&crate::crosshair::initial_bindings());
     initial.push('}');
     out.push_str(r#","bindings":"#);
     out.push_str(&initial);
@@ -1027,7 +1038,9 @@ mod tests {
             "no trailing commas"
         );
         assert!(DOCUMENT.contains("#jumpreset_text"));
-        for prefix in ["arrows", "cpsedit"] {
+        assert!(DOCUMENT.contains(r#""xhair":{"#) && DOCUMENT.contains(r#""drawgrid":{"#));
+        assert!(DOCUMENT.contains("@boldy_hud.xhair"));
+        for prefix in ["arrows", "cpsedit", "fpsedit"] {
             assert!(DOCUMENT.contains(&format!("#{prefix}_handle_3_offset")));
             assert!(DOCUMENT.contains(&format!("#{prefix}_size_offset")));
             let bound = overlay_bindings(prefix, [34.0, 16.0], 1.0, Some(Edit::default()));
@@ -1052,6 +1065,7 @@ mod tests {
             "{surface}"
         );
         assert!(surface.contains(r##""#arrows_visible":false"##));
+        assert!(surface.contains(r##""#crosshair_visible":false,"##));
         for index in 0..4 {
             assert!(surface.contains(&format!("handle_{index}_offset")));
         }

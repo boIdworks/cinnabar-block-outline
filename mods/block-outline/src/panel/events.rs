@@ -16,7 +16,10 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         "reset" => Reset::Page,
         "counter_reset" if !state.moving => Reset::Counter,
         "cps_reset" if !state.moving => Reset::Cps,
+        "fps_reset" if !state.moving => Reset::Fps,
         "zoom_reset" => Reset::Zoom,
+        "crosshair_reset" => Reset::Crosshair,
+        "crosshair_clear" => Reset::Drawing,
         _ => Reset::None,
     };
     let was = state.confirm;
@@ -33,8 +36,8 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
 
 fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     match id {
-        "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_zoom" | "open_light"
-        | "open_jump" => {
+        "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_fps" | "open_zoom"
+        | "open_light" | "open_jump" | "open_crosshair" => {
             if state.page != Page::Home {
                 return false;
             }
@@ -43,18 +46,21 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
                 "open_mob" => Page::Mob,
                 "open_zoom" => Page::Zoom,
                 "open_cps" => Page::Cps,
+                "open_fps" => Page::Fps,
                 "open_light" => Page::Lighting,
                 "open_jump" => Page::JumpReset,
+                "open_crosshair" => Page::Crosshair,
                 _ => Page::Counter,
             };
             state.colour_open = false;
             state.editing_fill = false;
             state.editing_aim = false;
+            state.drawing = false;
             return true;
         }
         // The start page's switches: each turns a mod on or off from the list.
-        "home_block" | "home_mob" | "home_counter" | "home_cps" | "home_zoom" | "home_light"
-        | "home_jump" => {
+        "home_block" | "home_mob" | "home_counter" | "home_cps" | "home_fps" | "home_zoom"
+        | "home_light" | "home_jump" | "home_crosshair" => {
             if state.page != Page::Home {
                 return false;
             }
@@ -64,8 +70,10 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
                 "home_mob" => settings.mob_on = on,
                 "home_counter" => settings.counter.on = on,
                 "home_cps" => settings.cps.on = on,
+                "home_fps" => settings.fps.on = on,
                 "home_zoom" => settings.zoom.on = on,
                 "home_jump" => settings.jump_reset.on = on,
+                "home_crosshair" => settings.crosshair.on = on,
                 _ => settings.fullbright = on,
             }
             return true;
@@ -76,9 +84,13 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
             }
             state.moving = false;
             commit_typing(settings, state);
-            // One step back: from the colour tools to the page, from the page to the start.
+            // One step back: from the colour tools or the drawing to the page, from the page to
+            // the start.
             if state.colour_open {
                 state.colour_open = false;
+            } else if state.drawing {
+                state.drawing = false;
+                state.draw_full = false;
             } else {
                 state.page = Page::Home;
             }
@@ -89,8 +101,10 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
         _ if id.starts_with("type_") => commit_typing(settings, state),
         _ if id.starts_with("counter") => return apply_counter(settings, state, id, value),
         _ if id.starts_with("cps") => return apply_cps(settings, state, id, value),
+        _ if id.starts_with("fps") => return apply_fps(settings, state, id, value),
         _ if id.starts_with("zoom") => return apply_zoom(settings, id, value),
         _ if id.starts_with("jump") => return apply_jump(settings, id, value),
+        _ if id.starts_with("crosshair") => return apply_crosshair(settings, state, id, value),
         _ => {}
     }
     if state.page == Page::Mob {
@@ -115,11 +129,17 @@ fn apply_counter(settings: &mut Settings, state: &mut MenuState, id: &str, value
             counter.on = true;
             state.moving = true;
             state.moving_cps = false;
+            state.moving_fps = false;
         }
         "counter_done" => state.moving = false,
         "counter_size" => counter.scale = 1.0,
         "counter_smaller" => counter.scale = Counter::stepped(counter.scale, -1.0),
         "counter_bigger" => counter.scale = Counter::stepped(counter.scale, 1.0),
+        "counter_reset" if state.moving_fps => {
+            // The Reset in the moving guide resets whatever is being moved.
+            settings.fps.pos = crate::fps::DEFAULT_POS;
+            settings.fps.scale = 1.0;
+        }
         "counter_reset" if state.moving_cps => {
             // The Reset in the moving guide resets whatever is being moved.
             settings.cps.pos = crate::cps::DEFAULT_POS;
@@ -148,6 +168,7 @@ fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
             cps.on = true;
             state.moving = true;
             state.moving_cps = true;
+            state.moving_fps = false;
         }
         "cps_size" => cps.scale = 1.0,
         "cps_size_less" => cps.scale = Cps::stepped(cps.scale, -1.0),
@@ -155,6 +176,32 @@ fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         "cps_reset" => {
             cps.pos = DEFAULT_POS;
             cps.scale = 1.0;
+        }
+        _ => return false,
+    }
+    (*settings, *state) != before
+}
+
+/// [`apply`] for the FPS counter page: the switch, moving, the size and reset.
+fn apply_fps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
+    use crate::cps::Cps;
+    let before = (*settings, *state);
+    let fps = &mut settings.fps;
+    match id {
+        "fps_on" => fps.on = value > 0.5,
+        "fps_move" => {
+            // Something to drag: moving shows the counter even while it is off.
+            fps.on = true;
+            state.moving = true;
+            state.moving_cps = false;
+            state.moving_fps = true;
+        }
+        "fps_size" => fps.scale = 1.0,
+        "fps_size_less" => fps.scale = Cps::stepped(fps.scale, -1.0),
+        "fps_size_more" => fps.scale = Cps::stepped(fps.scale, 1.0),
+        "fps_reset" => {
+            fps.pos = crate::fps::DEFAULT_POS;
+            fps.scale = 1.0;
         }
         _ => return false,
     }
@@ -174,6 +221,89 @@ fn apply_jump(settings: &mut Settings, id: &str, value: f32) -> bool {
         _ => return false,
     }
     *settings != before
+}
+
+/// [`apply`] for the Crosshair page: its switches, the colour button that shows or hides the
+/// colour tools, values that step or reset, and Reset, which keeps it on or off. (The colour
+/// tools' own controls are the outline pages', aimed at the crosshair's colour.)
+fn apply_crosshair(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
+    use crate::crosshair::{self, CUSTOM, DEFAULT, Drawing, GAP, LENGTH, RESOLUTIONS, THICKNESS};
+    if state.page != Page::Crosshair {
+        return false;
+    }
+    let before = (*settings, *state);
+    let c = &mut settings.crosshair;
+    // A value's own button resets it; its - and + step it.
+    let (id, step) = match (id.strip_suffix("_less"), id.strip_suffix("_more")) {
+        (Some(id), _) => (id, Some(false)),
+        (_, Some(id)) => (id, Some(true)),
+        _ => (id, None),
+    };
+    let steps = |up: bool| if up { 1.0 } else { -1.0 };
+    match (id, step) {
+        ("crosshair_on", None) => c.on = value > 0.5,
+        ("crosshair_outline", None) => c.outline = value > 0.5,
+        ("crosshair_colour", None) => {
+            state.colour_open = !state.colour_open;
+            state.drawing = false;
+        }
+        // Drawing shows the drawing: the Custom style, switched on.
+        ("crosshair_draw", None) => {
+            state.drawing = true;
+            state.colour_open = false;
+            state.draw_full = false;
+            c.style = CUSTOM;
+            c.on = true;
+        }
+        ("crosshair_mirror", None) => c.mirror = value > 0.5,
+        ("crosshair_clear", None) => {
+            c.pixels = Drawing::empty(c.pixels.size() as u8);
+            state.draw_full = false;
+        }
+        // A new resolution keeps the drawing's shape, and about its size on screen.
+        ("crosshair_res", None) => {
+            *c = crosshair::with_resolution(c, RESOLUTIONS[0]);
+            state.draw_full = false;
+        }
+        ("crosshair_res", Some(up)) => {
+            let size = crosshair::step_resolution(c.pixels.size() as u8, up);
+            *c = crosshair::with_resolution(c, size);
+            state.draw_full = false;
+        }
+        // On a drawing, the thickness value is its pixel size, in screen pixels.
+        ("crosshair_thickness", None) if c.style == CUSTOM => {
+            c.pixel_size = DEFAULT.pixel_size;
+        }
+        ("crosshair_thickness", Some(up)) if c.style == CUSTOM => {
+            c.pixel_size = crosshair::clamp_pixel_size(f32::from(c.pixel_size) + steps(up));
+        }
+        ("crosshair_style", None) => c.style = DEFAULT.style,
+        ("crosshair_style", Some(up)) => c.style = crosshair::step_style(c.style, up),
+        ("crosshair_length", None) => c.length = DEFAULT.length,
+        ("crosshair_length", Some(up)) => c.length = LENGTH.stepped(c.length, steps(up)),
+        ("crosshair_thickness", None) => c.thickness = DEFAULT.thickness,
+        ("crosshair_thickness", Some(up)) => {
+            c.thickness = THICKNESS.stepped(c.thickness, steps(up));
+        }
+        ("crosshair_gap", None) => c.gap = DEFAULT.gap,
+        ("crosshair_gap", Some(up)) => c.gap = GAP.stepped(c.gap, steps(up)),
+        ("crosshair_opacity", None) => c.opacity = DEFAULT.opacity,
+        ("crosshair_opacity", Some(up)) => c.opacity = crosshair::step_opacity(c.opacity, up),
+        ("crosshair_reset", None) => {
+            // The drawing is kept: Clear is for that.
+            *c = crate::crosshair::Crosshair {
+                on: c.on,
+                pixels: c.pixels,
+                pixel_size: c.pixel_size,
+                mirror: c.mirror,
+                ..DEFAULT
+            };
+            state.colour_open = false;
+            state.drawing = false;
+        }
+        _ => return false,
+    }
+    (*settings, *state) != before
 }
 
 /// [`apply`] for the Zoom page: switches, and values that step by one notch or reset.

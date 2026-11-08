@@ -3,8 +3,12 @@
 mod arena;
 pub mod counter;
 pub mod cps;
+pub mod fps;
+pub mod crosshair;
 #[cfg(target_arch = "wasm32")]
 mod guest;
+#[cfg(test)]
+mod host_dump;
 pub mod hudedit;
 pub mod jumpreset;
 pub mod outline;

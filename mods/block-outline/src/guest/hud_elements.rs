@@ -1,4 +1,5 @@
-//! The HUD elements: the arrow counter, the CPS readout and the editor that moves them. The
+//! The HUD elements: the arrow counter, the CPS readout, the FPS counter and the editor that
+//! moves them. The
 //! shared state (settings, menu, the published layer) lives in the parent module.
 
 use super::*;
@@ -14,6 +15,10 @@ const INVENTORY_RESERVE: u64 = 90_000;
 
 /// Fuel a frame needs left to read the combat feed; with less, a later frame does.
 const COMBAT_RESERVE: u64 = 40_000;
+
+/// Fuel a frame keeps over what sending the crosshair is expected to cost
+/// ([`crosshair::patch_cost`]), for the rest of the frame. With less, a later frame sends it.
+const CROSSHAIR_SPARE: u64 = 25_000;
 
 /// Fuel a frame needs left to save the settings (a new jump reset log row); with less, a later
 /// frame does.
@@ -36,19 +41,18 @@ fn count_width(arrows: u32) -> f32 {
     width
 }
 
-/// While moving, with the mouse alone: the arrow counter and the CPS readout both show their
-/// frames, and the editor ([`hudedit`]) moves or resizes what is dragged. Enter, Escape or the
-/// right button finish. Returns how each frame should look: the arrow counter's, then the CPS
-/// readout's.
+/// While moving, with the mouse alone: the arrow counter, the CPS readout and the FPS counter all
+/// show their frames, and the editor ([`hudedit`]) moves or resizes what is dragged. Enter,
+/// Escape or the right button finish. Returns how each frame should look, in that order.
 fn drag_elements(
     controls: &input::Controls,
     settings: &mut Settings,
     viewport: [f32; 2],
-    // Each element's size at scale 1: the arrow counter, then the CPS readout.
-    bases: [[f32; 2]; 2],
+    // Each element's size at scale 1: the arrow counter, the CPS readout, the FPS counter.
+    bases: [[f32; 2]; 3],
     seconds: f32,
-) -> [counter::Edit; 2] {
-    let before = (settings.counter, settings.cps);
+) -> [counter::Edit; 3] {
+    let before = (settings.counter, settings.cps, settings.fps);
     let mut items = [
         hudedit::Item {
             pos: settings.counter.pos,
@@ -58,11 +62,19 @@ fn drag_elements(
             pos: settings.cps.pos,
             scale: settings.cps.scale,
         },
+        hudedit::Item {
+            pos: settings.fps.pos,
+            scale: settings.fps.scale,
+        },
     ];
     let mut state = MENU.with(StdCell::get);
     let mut editor = EDITOR.with(StdCell::get);
     // The element grabbed last (or whose button opened this) takes the keys.
-    editor.selected = usize::from(state.moving_cps);
+    editor.selected = if state.moving_fps {
+        2
+    } else {
+        usize::from(state.moving_cps)
+    };
     let pressed = |key: &str| controls.keys_pressed.iter().any(|k| k == key);
     let input = hudedit::Input {
         pointer: controls.pointer.map(|(x, y)| [x, y]),
@@ -76,17 +88,20 @@ fn drag_elements(
     EDITOR.with(|e| e.set(editor));
     (settings.counter.pos, settings.counter.scale) = (items[0].pos, items[0].scale);
     (settings.cps.pos, settings.cps.scale) = (items[1].pos, items[1].scale);
-    if (settings.counter, settings.cps) != before {
+    (settings.fps.pos, settings.fps.scale) = (items[2].pos, items[2].scale);
+    if (settings.counter, settings.cps, settings.fps) != before {
         set_settings(*settings);
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
     }
     state.moving_cps = editor.selected == 1;
+    state.moving_fps = editor.selected == 2;
     if ["Escape", "Enter", "NumpadEnter", "MouseRight"]
         .iter()
         .any(|key| pressed(key))
     {
         state.moving = false;
         state.moving_cps = false;
+        state.moving_fps = false;
         MENU.with(|menu| menu.set(state));
         EDITOR.with(|e| e.set(hudedit::Editor::default()));
         push_menu_with(seconds, settings, state, true);
@@ -120,6 +135,7 @@ pub(super) fn arrow_counter(
             COUNTER_SHOWN.with(|shown| shown.set(None));
             CPS_WIDTHS.with(|w| w.set(None));
             CPS_SHOWN.with(|shown| shown.set(None));
+            FPS_SHOWN.with(|shown| shown.set(None));
             JUMP_SHOWN.with(|shown| shown.set(None));
         }
         if reaction.republish {
@@ -131,13 +147,24 @@ pub(super) fn arrow_counter(
         if seconds < HUD_RETRY_AT.with(StdCell::get) {
             return;
         }
-        // Publishing writes the layer's starting bindings: wait for a frame with fuel to spare.
-        if budget::remaining_fuel() < SURFACE_RESERVE {
+        // Publishing writes the layer's starting bindings: wait for a frame with fuel to spare,
+        // and with no other heavy job (the menu patch) in it.
+        if HEAVY_FRAME.with(StdCell::get) || headroom() < SURFACE_RESERVE {
             return;
         }
+        HEAVY_FRAME.with(|heavy| heavy.set(true));
         COUNTER_SHOWN.with(|shown| shown.set(None));
         CPS_SHOWN.with(|shown| shown.set(None));
+        FPS_SHOWN.with(|shown| shown.set(None));
         JUMP_SHOWN.with(|shown| shown.set(None));
+        // A new layer starts with the crosshair and the grid empty.
+        CROSSHAIR_SENT.with(|sent| sent.set(NOTHING_SENT));
+        GRID_SENT.with(|sent| sent.set(NOTHING_SENT));
+        GRID_CURSOR.with(|cursor| cursor.set(None));
+        CROSSHAIR_VISIBLE.with(|visible| visible.set(None));
+        if !hud_write() {
+            return;
+        }
         if let Err(error) = hud::set_surface(&counter::surface()) {
             HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
             if settings_with(|s| s.counter.on) {
@@ -167,15 +194,21 @@ pub(super) fn arrow_counter(
     let quiver = QUIVER.with(StdCell::get).map(|(_, _, quiver)| quiver);
     let arrows = quiver.map_or(0, |quiver| quiver.arrows);
     let text_width = count_width(arrows);
-    let mut edits = [counter::Edit::default(); 2];
+    let mut edits = [counter::Edit::default(); 3];
     if let (true, Some(controls), Some(viewport)) = (moving, controls, viewport) {
         let (_, _, layout) = cps_reading(seconds, &settings.cps);
-        let bases = [counter::size(1.0, text_width), cps::base(layout.total)];
+        let fps_width = cps_widths().fps_width(FPS.with(StdCell::get).fps());
+        let bases = [
+            counter::size(1.0, text_width),
+            cps::base(layout.total),
+            fps::base(fps_width),
+        ];
         edits = drag_elements(controls, &mut settings, viewport, bases, seconds);
     }
     // A moved counter is saved once, when moving ends, not on every step of a drag.
     let moving = MENU.with(StdCell::get).moving && panel_open;
     EDIT_CPS.with(|edit| edit.set(moving.then_some(edits[1])));
+    EDIT_FPS.with(|edit| edit.set(moving.then_some(edits[2])));
     if !moving && COUNTER_UNSAVED.with(StdCell::get) {
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(false));
         EDITOR.with(|editor| editor.set(hudedit::Editor::default()));
@@ -225,6 +258,9 @@ pub(super) fn arrow_counter(
     let shown = COUNTER_SHOWN.with(StdCell::get);
     // Hidden is hidden, whatever it would have shown.
     if shown.is_some_and(|shown| shown == view || (!shown.visible && !view.visible)) {
+        return;
+    }
+    if !hud_write() {
         return;
     }
     match hud::update_surface(&counter::patch(&view)) {
@@ -297,6 +333,9 @@ pub(super) fn cps_frame(
     if shown.is_some_and(|shown| shown == view || (!shown.visible && !view.visible)) {
         return;
     }
+    if !hud_write() {
+        return;
+    }
     match hud::update_surface(&cps::patch(&view)) {
         Ok(()) => CPS_SHOWN.with(|s| s.set(Some(view))),
         Err(error) => {
@@ -306,6 +345,268 @@ pub(super) fn cps_frame(
             report_once(&format!("Boldy Mods: CPS counter failed ({error})"));
         }
     }
+}
+
+/// Keeps the FPS counter on the HUD up to date. The frames are counted in `frame_body`; the
+/// number changes every [`fps::EVERY`] seconds, so the HUD is patched about twice a second.
+pub(super) fn fps_frame(seconds: f32, hud_size: Option<[f32; 3]>) {
+    let settings = settings_with(|s| s.fps);
+    // The layer is published by the arrow counter; patch it only once it is up.
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        FPS_SHOWN.with(|shown| shown.set(None));
+        return;
+    }
+    let edit = EDIT_FPS.with(StdCell::get);
+    let view = match hud_size.filter(|_| settings.on || edit.is_some()) {
+        Some(viewport) => {
+            let fps = FPS.with(StdCell::get).fps();
+            let width = cps_widths().fps_width(fps);
+            let scale = cps::clamp_scale(settings.scale);
+            fps::View {
+                visible: true,
+                fps,
+                scale,
+                width,
+                offset: counter::place(
+                    settings.pos,
+                    fps::size(scale, width),
+                    [viewport[0], viewport[1]],
+                ),
+                edit,
+            }
+        }
+        None => fps::View::HIDDEN,
+    };
+    let shown = FPS_SHOWN.with(StdCell::get);
+    // Hidden is hidden, whatever it would have shown.
+    if shown.is_some_and(|shown| shown == view || (!shown.visible && !view.visible)) {
+        return;
+    }
+    if !hud_write() {
+        return;
+    }
+    match hud::update_surface(&fps::patch(&view)) {
+        Ok(()) => FPS_SHOWN.with(|s| s.set(Some(view))),
+        Err(error) => {
+            // The layer is gone (or was refused): the arrow counter publishes it again.
+            HUD_PUBLISHED.with(|published| published.set(false));
+            HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+            report_once(&format!("Boldy Mods: FPS counter failed ({error})"));
+        }
+    }
+}
+
+/// The next step of sending `plan` over what the layer has (`sent`): the first part that
+/// changed, else the header (`None`) if it did. Parts first: they are only drawn once the header
+/// places them, so a new crosshair appears whole, in the frame its header is sent.
+fn next_step(plan: &crosshair::Plan, sent: &Sent) -> Option<Option<usize>> {
+    let empty = crosshair::empty_part();
+    if let Some(index) =
+        (0..crosshair::PARTS).find(|&index| sent.1[index].unwrap_or(empty) != plan.parts[index])
+    {
+        return Some(Some(index));
+    }
+    (sent.0 != Some(plan.header)).then_some(None)
+}
+
+/// Whether this frame can afford a costly patch: no other this frame, `cost` fuel and some to
+/// spare, and a HUD write left. Taking it marks the frame as having done one.
+fn afford(cost: u64) -> bool {
+    if HEAVY_FRAME.with(StdCell::get) || headroom() < cost + CROSSHAIR_SPARE || !hud_write() {
+        return false;
+    }
+    HEAVY_FRAME.with(|heavy| heavy.set(true));
+    true
+}
+
+/// The custom crosshair: shown in place of the game's own while it is switched on, and only
+/// where the game would draw its own (not with the HUD hidden or in third person). On its menu
+/// page it shows whatever the game does, so changes can be seen as they are made. The game's
+/// crosshair is hidden only while this one shows, so there is never no crosshair at all.
+///
+/// A changed crosshair is sent in steps, one a frame: its header, then each part that changed
+/// (see [`crosshair`]); showing and hiding it is a binding. A refused patch is reported once
+/// and counted as sent, so it never turns into a patch every frame.
+pub(super) fn crosshair_frame(controls: Option<&input::Controls>, hud_size: Option<[f32; 3]>) {
+    let look = settings_with(|s| s.crosshair);
+    let published = HUD_PUBLISHED.with(StdCell::get);
+    // The game's crosshair gives way only while this one shows: not while it is still being
+    // sent, nor where it cannot show (the HUD's size unknown), so there is always one.
+    let replace = look.on && published && CROSSHAIR_VISIBLE.with(StdCell::get) == Some(true);
+    if VANILLA_CROSSHAIR_HIDDEN.with(StdCell::get) != replace && hud_write() {
+        let hidden: &[hud::VanillaElement] = if replace {
+            &[hud::VanillaElement::Crosshair]
+        } else {
+            &[]
+        };
+        if hud::set_hidden_elements(hidden).is_ok() {
+            VANILLA_CROSSHAIR_HIDDEN.with(|cell| cell.set(replace));
+        }
+    }
+    // The layer is published by the arrow counter; patch it only once it is up.
+    if !published {
+        return;
+    }
+    let previewing = controls.is_some_and(|c| c.panel_open)
+        && MENU.with(StdCell::get).page == panel::Page::Crosshair;
+    let view = match hud_size {
+        Some(viewport) if look.on && (previewing || vanilla_crosshair_shown()) => {
+            Some(crosshair::View { look, viewport })
+        }
+        _ => None,
+    };
+    let visible = CROSSHAIR_VISIBLE.with(StdCell::get);
+    let Some(view) = view else {
+        if visible != Some(false) && hud_write() {
+            CROSSHAIR_VISIBLE.with(|shown| shown.set(Some(false)));
+            send(&crosshair::visibility(false), "crosshair");
+        }
+        return;
+    };
+    // The shape and plan, worked out once for a view: a large drawing costs to work out.
+    let planned = CROSSHAIR_PLAN.with(|plan| {
+        plan.borrow()
+            .as_ref()
+            .is_some_and(|(known, ..)| *known == view)
+    });
+    if !planned {
+        if HEAVY_FRAME.with(StdCell::get)
+            || headroom() < crosshair::plan_cost(&view.look) + CROSSHAIR_SPARE
+        {
+            return;
+        }
+        let shape = crosshair::view_shape(&view);
+        let plan = crosshair::plan(&view, &shape);
+        CROSSHAIR_PLAN.with(|known| *known.borrow_mut() = Some((view, shape, plan)));
+    }
+    let sent = CROSSHAIR_SENT.with(StdCell::get);
+    let patch = CROSSHAIR_PLAN.with(|known| {
+        let known = known.borrow();
+        let (_, shape, plan) = known.as_ref()?;
+        let step = next_step(plan, &sent)?;
+        let cost = match step {
+            None => crosshair::header_cost(shape),
+            Some(index) => crosshair::part_cost(shape, index),
+        };
+        if !afford(cost) {
+            return Some(None);
+        }
+        let mut sent = sent;
+        let patch = match step {
+            None => {
+                sent.0 = Some(plan.header);
+                crosshair::header_patch(&view, shape)
+            }
+            Some(index) => {
+                sent.1[index] = Some(plan.parts[index]);
+                crosshair::part_patch(&view, shape, index)
+            }
+        };
+        CROSSHAIR_SENT.with(|cell| cell.set(sent));
+        Some(Some((patch, step.is_none())))
+    });
+    match patch {
+        // A step this frame could not afford: a later one sends it.
+        Some(None) => {}
+        Some(Some((patch, header))) => {
+            if header {
+                // The header shows the crosshair.
+                CROSSHAIR_VISIBLE.with(|shown| shown.set(Some(true)));
+            }
+            send(&patch, "crosshair");
+        }
+        // Everything sent: only showing it may be left.
+        None => {
+            if visible != Some(true) && hud_write() {
+                CROSSHAIR_VISIBLE.with(|shown| shown.set(Some(true)));
+                send(&crosshair::visibility(true), "crosshair");
+            }
+        }
+    }
+}
+
+/// The drawing grid's highlight: on the pixel under the pointer (and with Mirror on, on its
+/// reflections), so it is plain where a click lands on a fine grid. Hidden off the grid and with
+/// the grid not shown (`controls` none). A small patch, sent only when the pixel changes.
+fn grid_cursor(controls: Option<&input::Controls>) {
+    let (size, mirror) = settings_with(|s| (s.crosshair.pixels.size(), s.crosshair.mirror));
+    let cell = controls
+        .and_then(super::card_pointer)
+        .and_then(|point| panel::draw_cell(point, size));
+    let key = (cell, mirror, size);
+    if GRID_CURSOR.with(StdCell::get) == Some(key) || !hud_write() {
+        return;
+    }
+    GRID_CURSOR.with(|cursor| cursor.set(Some(key)));
+    send(
+        &crosshair::grid_cursor_patch(size, cell, mirror),
+        "drawing grid",
+    );
+}
+
+/// Sends a crosshair or grid patch, reporting a refusal once.
+fn send(patch: &str, what: &str) {
+    if let Err(error) = hud::update_surface(patch) {
+        report_once(&format!("Boldy Mods: {what} failed ({error})"));
+    }
+}
+
+/// The menu's drawing grid: the HUD's `drawgrid`, which the Crosshair page embeds, sent in
+/// steps like the crosshair whenever the drawing, its resolution or its colour changed while the
+/// grid shows.
+pub(super) fn draw_grid_frame(controls: Option<&input::Controls>) {
+    let state = MENU.with(StdCell::get);
+    let showing = controls.is_some_and(|c| c.panel_open)
+        && state.page == panel::Page::Crosshair
+        && state.drawing;
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        return;
+    }
+    grid_cursor(controls.filter(|_| showing));
+    if !showing || HEAVY_FRAME.with(StdCell::get) {
+        return;
+    }
+    let key = settings_with(|s| (s.crosshair.pixels, s.crosshair.rgb));
+    let planned = GRID_PLAN.with(|plan| {
+        plan.borrow()
+            .as_ref()
+            .is_some_and(|(known, _)| *known == key)
+    });
+    if !planned {
+        if headroom() < crosshair::grid_plan_cost(&key.0) + CROSSHAIR_SPARE {
+            return;
+        }
+        let plan = crosshair::grid_plan(&key.0, key.1);
+        GRID_PLAN.with(|known| *known.borrow_mut() = Some((key, plan)));
+    }
+    let Some(plan) = GRID_PLAN.with(|known| known.borrow().as_ref().map(|(_, plan)| plan.clone()))
+    else {
+        return;
+    };
+    let mut sent = GRID_SENT.with(StdCell::get);
+    let Some(step) = next_step(&plan, &sent) else {
+        return;
+    };
+    let (drawing, rgb) = key;
+    let cost = match step {
+        None => crosshair::grid_header_cost(),
+        Some(index) => crosshair::grid_part_cost(&drawing, index),
+    };
+    if !afford(cost) {
+        return;
+    }
+    let patch = match step {
+        None => {
+            sent.0 = Some(plan.header);
+            crosshair::grid_header_patch(&drawing, rgb)
+        }
+        Some(index) => {
+            sent.1[index] = Some(plan.parts[index]);
+            crosshair::grid_part_patch(&drawing, index)
+        }
+    };
+    GRID_SENT.with(|cell| cell.set(sent));
+    send(&patch, "drawing grid");
 }
 
 /// What the jump reset reads of its settings every frame.
@@ -346,7 +647,7 @@ pub(super) fn jump_reset_frame(
     }
     if live.on {
         tracker.step(delta);
-        if budget::remaining_fuel() >= COMBAT_RESERVE {
+        if headroom() >= COMBAT_RESERVE {
             const LIMIT: usize = mod_api::MAX_COMBAT_READ_EVENTS;
             if let Ok(events) = player_state::read_combat(feed.after, LIMIT as u32) {
                 let mut batch = [(0u64, false); LIMIT];
@@ -374,7 +675,7 @@ pub(super) fn jump_reset_frame(
             }
         }
         // Your velocity every frame, so the frame of a hit has one before it to compare with.
-        let motion = if budget::remaining_fuel() >= COMBAT_RESERVE {
+        let motion = if headroom() >= COMBAT_RESERVE {
             player_state::read_motion().ok().flatten()
         } else {
             None
@@ -408,12 +709,8 @@ pub(super) fn jump_reset_frame(
                 // A jump reset is also kept in a list of its own, so it is not pushed out by the
                 // ordinary hits after it.
                 if found.reset {
-                    JUMP_RESETS.with(|resets| {
-                        jumpreset::push_capped(
-                            &mut resets.borrow_mut(),
-                            row.clone(),
-                            jumpreset::RESETS_KEPT,
-                        );
+                    resets_with(|resets| {
+                        jumpreset::push_capped(resets, row.clone(), jumpreset::RESETS_KEPT);
                     });
                 }
                 JUMP_TRACES.with(|traces| {
@@ -452,7 +749,7 @@ pub(super) fn jump_reset_frame(
     JUMP_RESET.with(|state| state.set((tracker, feed, session)));
     JUMP_WATCH.with(|stored| stored.set(watch));
     JUMP_VERDICT.with(|stored| stored.set((verdict, outcome)));
-    if JUMP_LOG_UNSAVED.with(StdCell::get) && budget::remaining_fuel() >= LOG_SAVE_RESERVE {
+    if JUMP_LOG_UNSAVED.with(StdCell::get) && headroom() >= LOG_SAVE_RESERVE {
         JUMP_LOG_UNSAVED.with(|unsaved| unsaved.set(false));
         save_settings(&settings());
     }
@@ -481,6 +778,9 @@ pub(super) fn jump_reset_frame(
     let shown = JUMP_SHOWN.with(StdCell::get);
     // Hidden is hidden, whatever it would have shown.
     if shown.is_some_and(|shown| shown == view || (shown.is_hidden() && view.is_hidden())) {
+        return;
+    }
+    if !hud_write() {
         return;
     }
     match hud::update_surface(&jumpreset::patch(&view)) {
@@ -514,8 +814,8 @@ fn cps_counts(seconds: f32, settings: &cps::Cps) -> (u32, Option<u32>) {
     })
 }
 
-/// The CPS text's pieces measured at text scale 1, once per GUI scale: `CPS:`, a digit, a
-/// space and the bar. Measured with a digit beside them, as a trailing space may not count.
+/// The CPS text's pieces measured at text scale 1, once per GUI scale: `CPS:`, `FPS:`, a digit,
+/// a space and the bar. Measured with a digit beside them, as a trailing space may not count.
 fn cps_widths() -> cps::Widths {
     if let Some(widths) = CPS_WIDTHS.with(StdCell::get) {
         return widths;
@@ -525,9 +825,16 @@ fn cps_widths() -> cps::Widths {
             .ok()
             .filter(|width| width.is_finite() && *width > 0.0)
     };
-    let widths = match (measure("0"), measure("CPS:0"), measure(" 0"), measure("|0")) {
-        (Some(digit), Some(caption), Some(space), Some(bar)) => cps::Widths {
+    let widths = match (
+        measure("0"),
+        measure("CPS:0"),
+        measure("FPS:0"),
+        measure(" 0"),
+        measure("|0"),
+    ) {
+        (Some(digit), Some(caption), Some(fps_caption), Some(space), Some(bar)) => cps::Widths {
             caption: (caption - digit).max(0.0),
+            fps_caption: (fps_caption - digit).max(0.0),
             digit,
             space: (space - digit).max(1.0),
             bar: (bar - digit).max(1.0),
@@ -567,7 +874,7 @@ fn refresh_quiver() {
     }) {
         return;
     }
-    if budget::remaining_fuel() < INVENTORY_RESERVE {
+    if headroom() < INVENTORY_RESERVE {
         return;
     }
     HEAVY_FRAME.with(|heavy| heavy.set(true));

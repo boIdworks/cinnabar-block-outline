@@ -181,11 +181,13 @@ impl Layout {
     };
 }
 
-/// The pieces of the text, measured once at text scale 1: `CPS:`, one digit, a space and the
-/// bar. Every digit is as wide as the others in Cinnabar's font.
+/// The pieces of the text, measured once at text scale 1: `CPS:`, `FPS:` (for the FPS counter,
+/// see [`crate::fps`]), one digit, a space and the bar. Every digit is as wide as the others in
+/// Cinnabar's font.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Widths {
     pub caption: f32,
+    pub fps_caption: f32,
     pub digit: f32,
     pub space: f32,
     pub bar: f32,
@@ -195,6 +197,7 @@ impl Widths {
     /// A guess for when the text cannot be measured.
     pub const GUESS: Widths = Widths {
         caption: 24.0,
+        fps_caption: 24.0,
         digit: 6.0,
         space: 4.0,
         bar: 2.0,
@@ -229,6 +232,12 @@ impl Widths {
                 }
             }
         }
+    }
+
+    /// Width of the FPS counter's text, `FPS: 144`: room for three digits, or more once needed,
+    /// so it keeps its size from 100 down to 0.
+    pub fn fps_width(&self, fps: u32) -> f32 {
+        self.fps_caption + self.space + self.digit * crate::counter::digits(fps).max(3) as f32
     }
 }
 

@@ -32,12 +32,22 @@ pub(super) enum View {
     Counter,
     /// The CPS page.
     Cps,
+    /// The FPS counter page.
+    Fps,
     /// The Zoom page.
     Zoom,
     /// The Lighting page.
     Lighting,
     /// The Jump reset page.
     JumpReset,
+    /// The Crosshair page's settings view.
+    Crosshair,
+    /// The Crosshair page's colour button, in every view.
+    CrosshairTop,
+    /// The Crosshair page's Draw button beside it, but in the drawing view.
+    CrosshairDrawButton,
+    /// The Crosshair page's drawing view.
+    Draw,
 }
 
 /// What a control is, which is also what the keyboard does to it.
@@ -164,6 +174,18 @@ fn build() -> Vec<Control> {
     );
     add(
         View::Home,
+        [10.0, HOME_FPS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Frames per second, on your HUD",
+        press("open_fps"),
+    );
+    add(
+        View::Home,
+        [home_switch_x, HOME_FPS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide the FPS counter",
+        Action::Toggle("home_fps"),
+    );
+    add(
+        View::Home,
         [10.0, HOME_ZOOM_Y, HOME_BUTTON_W, HOME_BUTTON_H],
         "Hold a key to zoom in smoothly",
         press("open_zoom"),
@@ -197,6 +219,18 @@ fn build() -> Vec<Control> {
         [home_switch_x, HOME_JUMP_Y, HOME_SWITCH_W, HOME_BUTTON_H],
         "Turn the jump reset timing on or off",
         Action::Toggle("home_jump"),
+    );
+    add(
+        View::Home,
+        [10.0, HOME_CROSS_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Shape, size and colour of your crosshair",
+        press("open_crosshair"),
+    );
+    add(
+        View::Home,
+        [home_switch_x, HOME_CROSS_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Use your own crosshair or the game's",
+        Action::Toggle("home_crosshair"),
     );
     add(
         View::Home,
@@ -500,6 +534,46 @@ fn build() -> Vec<Control> {
         "Top left at 100%%; click twice",
         press("cps_reset"),
     );
+    add(
+        View::Fps,
+        row(FPS_ON_Y),
+        "Shows or hides the frames per second",
+        Action::Toggle("fps_on"),
+    );
+    add(
+        View::Fps,
+        row(FPS_MOVE_Y),
+        "Move the HUD: drag, scroll to resize",
+        press("fps_move"),
+    );
+    add(
+        View::Fps,
+        value_area(FPS_SIZE_Y),
+        "Click the size to reset it to 100%%",
+        Action::Help,
+    );
+    add(
+        View::Fps,
+        pair_area(FPS_SIZE_Y),
+        "10%% smaller or bigger",
+        Action::Help,
+    );
+    add(
+        View::Fps,
+        row(FPS_SIZE_Y),
+        STEPPER_TIP,
+        Action::Stepper {
+            value: "fps_size",
+            less: "fps_size_less",
+            more: "fps_size_more",
+        },
+    );
+    add(
+        View::Fps,
+        row(FPS_RESET_Y),
+        "Below the CPS at 100%%; click twice",
+        press("fps_reset"),
+    );
 
     // The Lighting page.
     add(
@@ -543,6 +617,128 @@ fn build() -> Vec<Control> {
             less: "jump_window_less",
             more: "jump_window_more",
         },
+    );
+
+    // The Crosshair page: its colour button, shown above the colour tools and the drawing too,
+    // and beside it Draw, or (in the drawing view) the resolution.
+    add(
+        View::CrosshairTop,
+        half(EDIT_Y),
+        "Shows or hides the colour tools",
+        press("crosshair_colour"),
+    );
+    add(
+        View::CrosshairDrawButton,
+        half_right(EDIT_Y),
+        "Paint your own crosshair, pixel by pixel",
+        press("crosshair_draw"),
+    );
+    for ((value, _, _, y), (value_tip, pair_tip, less, more)) in CROSS_VALUES.into_iter().zip([
+        (
+            "The shape; click to go back to a cross",
+            "The previous or next shape",
+            "crosshair_style_less",
+            "crosshair_style_more",
+        ),
+        (
+            "How long each line is; click to reset",
+            "Half a pixel shorter or longer",
+            "crosshair_length_less",
+            "crosshair_length_more",
+        ),
+        (
+            "How thick the lines are; click to reset",
+            "Half a pixel thinner or thicker",
+            "crosshair_thickness_less",
+            "crosshair_thickness_more",
+        ),
+        (
+            "Room in the middle; click to reset",
+            "Half a pixel less or more",
+            "crosshair_gap_less",
+            "crosshair_gap_more",
+        ),
+        (
+            "How solid it is; click to reset",
+            "10%% less or more",
+            "crosshair_opacity_less",
+            "crosshair_opacity_more",
+        ),
+    ]) {
+        add(View::Crosshair, value_area(y), value_tip, Action::Help);
+        add(View::Crosshair, pair_area(y), pair_tip, Action::Help);
+        add(
+            View::Crosshair,
+            row(y),
+            STEPPER_TIP,
+            Action::Stepper { value, less, more },
+        );
+    }
+    add(
+        View::Crosshair,
+        half(CROSS_TOGGLES_Y),
+        "Use it in place of the game's crosshair",
+        Action::Toggle("crosshair_on"),
+    );
+    add(
+        View::Crosshair,
+        half_right(CROSS_TOGGLES_Y),
+        "A thin dark edge, seen on any ground",
+        Action::Toggle("crosshair_outline"),
+    );
+    add(
+        View::Crosshair,
+        row(CROSS_RESET_Y),
+        "Back to defaults; click twice",
+        press("crosshair_reset"),
+    );
+
+    // The drawing view: the grid, then Mirror and Clear.
+    let [gx, gy, side] = DRAW_GRID;
+    add(
+        View::Draw,
+        [gx, gy, side, side],
+        "Left click draws, right click erases",
+        Action::Help,
+    );
+    add(
+        View::Draw,
+        [TOP_RIGHT_X, EDIT_Y, RES_VALUE_W, BUTTON_H],
+        "Pixels a side; click for 16x16",
+        Action::Help,
+    );
+    add(
+        View::Draw,
+        [
+            TOP_RIGHT_X + RES_VALUE_W,
+            EDIT_Y,
+            HALF - RES_VALUE_W,
+            BUTTON_H,
+        ],
+        "Half or twice as many pixels",
+        Action::Help,
+    );
+    add(
+        View::Draw,
+        half_right(EDIT_Y),
+        STEPPER_TIP,
+        Action::Stepper {
+            value: "crosshair_res",
+            less: "crosshair_res_less",
+            more: "crosshair_res_more",
+        },
+    );
+    add(
+        View::Draw,
+        half(DRAW_BUTTONS_Y),
+        "Paints all four quarters at once",
+        Action::Toggle("crosshair_mirror"),
+    );
+    add(
+        View::Draw,
+        half_right(DRAW_BUTTONS_Y),
+        "Empties the grid; click twice",
+        press("crosshair_clear"),
     );
 
     // The Zoom page.
@@ -650,10 +846,15 @@ fn shown(view: View, state: MenuState, fill_matches: bool) -> bool {
         View::MobTop => state.page == Page::Mob,
         View::Counter => state.page == Page::Counter,
         View::Cps => state.page == Page::Cps,
+        View::Fps => state.page == Page::Fps,
         View::Zoom => state.page == Page::Zoom,
         View::Lighting => state.page == Page::Lighting,
         View::JumpReset => state.page == Page::JumpReset,
-        View::Colour => outline && colour_open,
+        View::Crosshair => state.page == Page::Crosshair && !colour_open && !state.drawing,
+        View::Draw => state.page == Page::Crosshair && state.drawing,
+        View::CrosshairTop => state.page == Page::Crosshair,
+        View::CrosshairDrawButton => state.page == Page::Crosshair && !state.drawing,
+        View::Colour => state.page.has_colour() && colour_open,
         View::FillOwn => state.page == Page::Block && !fill_matches,
         View::FillMatch => state.page == Page::Block && fill_matches,
     }
@@ -742,13 +943,18 @@ fn toggle_on(settings: &Settings, state: MenuState, id: &str) -> bool {
         "home_mob" => shown.mob_on,
         "home_counter" => shown.counter.on,
         "home_cps" => shown.cps.on,
+        "home_fps" => shown.fps.on,
         "home_zoom" => shown.zoom.on,
         "jump_on" | "home_jump" => shown.jump_reset.on,
+        "crosshair_on" | "home_crosshair" => shown.crosshair.on,
+        "crosshair_outline" => shown.crosshair.outline,
+        "crosshair_mirror" => shown.crosshair.mirror,
         "counter" => shown.counter.on,
         "counter_bow" => shown.counter.bow_only,
         "cps_on" => shown.cps.on,
         "cps_right" => shown.cps.right,
         "cps_zeros" => shown.cps.zeros,
+        "fps_on" => shown.fps.on,
         "zoom" => shown.zoom.on,
         "zoom_mode" => shown.zoom.toggle,
         "zoom_scroll" => shown.zoom.scroll,

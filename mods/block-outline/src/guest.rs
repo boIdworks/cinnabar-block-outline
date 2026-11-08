@@ -24,6 +24,8 @@ use mod_api::drawing::{self, api as draw, shapes};
 
 use crate::counter::{self, Quiver};
 use crate::cps;
+use crate::fps;
+use crate::crosshair;
 use crate::hudedit;
 use crate::jumpreset;
 use crate::outline::{self, Cell, Hit, KeyName, Settings};
@@ -139,7 +141,9 @@ impl Blocks {
 }
 
 mod hud_elements;
-use hud_elements::{arrow_counter, cps_frame, jump_reset_frame};
+use hud_elements::{
+    arrow_counter, cps_frame, crosshair_frame, draw_grid_frame, fps_frame, jump_reset_frame,
+};
 
 /// Whether to measure where each frame's fuel goes, by feature. Off: every `timed` call is just
 /// the work, with no extra host calls and no periodic save. Switch it on to profile: the numbers
@@ -147,7 +151,7 @@ use hud_elements::{arrow_counter, cps_frame, jump_reset_frame};
 /// `FUEL_SAVE_EVERY` seconds of play.
 const PROFILE: bool = false;
 
-const SECTIONS: [&str; 20] = [
+const SECTIONS: [&str; 21] = [
     "reads",
     "menu",
     "arrow",
@@ -168,6 +172,7 @@ const SECTIONS: [&str; 20] = [
     "boxes",
     "keep",
     "shapes",
+    "crosshair",
 ];
 const S_READS: usize = 0;
 const S_MENU: usize = 1;
@@ -189,6 +194,7 @@ const S_MINING: usize = 16;
 const S_BOXES: usize = 17;
 const S_KEEP: usize = 18;
 const S_SHAPES: usize = 19;
+const S_CROSSHAIR: usize = 20;
 /// How often the numbers are saved, and the fuel a frame needs left for that (a save costs about
 /// 65,000).
 const FUEL_SAVE_EVERY: f32 = 30.0;
@@ -231,6 +237,17 @@ type CpsKey = (
 /// jump keys found so far.
 type BindingsRead = (u64, u32, Vec<String>, Vec<String>);
 
+/// What the HUD layer has of a crosshair or the drawing grid: the header's hash (none sent
+/// yet) and each part's (none: still empty, as the layer starts).
+type Sent = (Option<u64>, [Option<u64>; crosshair::PARTS]);
+/// Where the drawing grid's highlight is: the pixel (row, column), Mirror, the resolution.
+type GridCursor = (Option<(usize, usize)>, bool, usize);
+/// The drawing and colour the menu's grid shows, and the plan worked out for them.
+type GridPlan = ((crosshair::Drawing, [u8; 3]), crosshair::Plan);
+/// A crosshair's view, and the shape and plan worked out for it.
+type CrosshairPlan = (crosshair::View, crosshair::Shape, crosshair::Plan);
+const NOTHING_SENT: Sent = (None, [None; crosshair::PARTS]);
+
 /// The latest jump reset timing verdict and knockback outcome, with when each was made.
 type JumpVerdicts = (
     Option<(jumpreset::Timing, f32)>,
@@ -257,7 +274,7 @@ thread_local! {
     /// When to next try uploading the cube while it is missing, in accumulated seconds.
     static UPLOAD_RETRY_AT: StdCell<f32> = const { StdCell::new(0.0) };
     /// Unsaved menu state: key capture and whether the colour tools edit the fill.
-    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, capturing_zoom: false, editing_fill: false, editing_aim: false, page: panel::Page::Home, colour_open: false, typing: None, confirm: panel::Reset::None, focus: None, moving: false, moving_cps: false, guide_bottom: false, fuel_k: [0, 0] }) };
+    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, capturing_zoom: false, editing_fill: false, editing_aim: false, page: panel::Page::Home, colour_open: false, typing: None, confirm: panel::Reset::None, focus: None, moving: false, moving_cps: false, moving_fps: false, guide_bottom: false, fuel_k: [0, 0], drawing: false, draw_full: false }) };
     /// The player's attack keys (`MouseLeft` until read) and the bindings revision they came
     /// from, re-read every `BINDINGS_SECONDS`.
     static ATTACK_KEYS: RefCell<(Option<u64>, Vec<String>)> = const { RefCell::new((None, Vec::new())) };
@@ -307,8 +324,20 @@ thread_local! {
     /// The last merged outline worked out, by its inflated boxes: shapes with several boxes cost
     /// a little to merge, so a block's outline is only worked out when the target changes.
     static SEGMENTS: RefCell<Option<(outline::Boxes, Vec<outline::Segment>)>> = const { RefCell::new(None) };
-    /// Whether the HUD was hidden (F1) when last checked, and when.
-    static HUD_HIDDEN: StdCell<(bool, f32)> = const { StdCell::new((false, f32::NEG_INFINITY)) };
+    /// The game's HUD elements when last read: whether the whole HUD was hidden (F1), whether
+    /// the game would draw its crosshair, and when they were read.
+    static HUD_HIDDEN: StdCell<(bool, bool, f32)> =
+        const { StdCell::new((false, true, f32::NEG_INFINITY)) };
+    /// Whether this mod has the game's own crosshair hidden, in place of its custom one.
+    static VANILLA_CROSSHAIR_HIDDEN: StdCell<bool> = const { StdCell::new(false) };
+    /// HUD writes (surface, patches, hidden elements, label) made in this callback.
+    static HUD_WRITES: StdCell<u32> = const { StdCell::new(0) };
+    /// The stroke being drawn on the crosshair grid: whether it draws (left button) or erases
+    /// (right), and the last pixel painted, which the next frame's line starts from.
+    static DRAW_STROKE: StdCell<Option<(bool, (usize, usize))>> = const { StdCell::new(None) };
+    /// The settings changed (a menu change, or a drawing stroke) and the settings file does not
+    /// have them yet: saved in the first frame with the fuel for it, after a stroke ends.
+    static SETTINGS_UNSAVED: StdCell<bool> = const { StdCell::new(false) };
     /// The control under the pointer and when the pointer arrived on it.
     static HOVER: StdCell<Option<(usize, f32)>> = const { StdCell::new(None) };
     /// When the rainbow preview in the menu was last sent.
@@ -340,6 +369,10 @@ thread_local! {
     static CPS_KEY: StdCell<Option<CpsKey>> = const { StdCell::new(None) };
     /// The CPS text's measured pieces, measured again when the GUI scale changes.
     static CPS_WIDTHS: StdCell<Option<cps::Widths>> = const { StdCell::new(None) };
+    /// Counts frames for the FPS counter.
+    static FPS: StdCell<fps::Meter> = const { StdCell::new(fps::Meter::new()) };
+    /// What the FPS counter last showed, so it is only patched when something changes.
+    static FPS_SHOWN: StdCell<Option<fps::View>> = const { StdCell::new(None) };
     /// The most fuel any frame has used since the mod started, and when the start page's fuel
     /// line was last refreshed.
     static FUEL_PEAK: StdCell<u64> = const { StdCell::new(0) };
@@ -362,6 +395,8 @@ thread_local! {
     /// How the CPS readout's frame looks while the HUD is edited, set by the arrow counter's
     /// frame, which handles the pointer for both elements.
     static EDIT_CPS: StdCell<Option<counter::Edit>> = const { StdCell::new(None) };
+    /// The same for the FPS counter's frame.
+    static EDIT_FPS: StdCell<Option<counter::Edit>> = const { StdCell::new(None) };
     /// The counter was moved or resized but not saved yet; saved once moving ends.
     static COUNTER_UNSAVED: StdCell<bool> = const { StdCell::new(false) };
     /// The zoom's easing state.
@@ -370,6 +405,21 @@ thread_local! {
     static ZOOM_TOGGLED: StdCell<bool> = const { StdCell::new(false) };
     /// The hotbar slot last seen while zooming, to turn a scroll into zoom steps.
     static ZOOM_SLOT: StdCell<Option<u8>> = const { StdCell::new(None) };
+}
+
+thread_local! {
+    /// The crosshair being shown: its view, and the shape and plan worked out for it once.
+    static CROSSHAIR_PLAN: RefCell<Option<CrosshairPlan>> = const { RefCell::new(None) };
+    /// What the HUD has of the crosshair, and of the menu's drawing grid: header and parts.
+    static CROSSHAIR_SENT: StdCell<Sent> = const { StdCell::new(NOTHING_SENT) };
+    static GRID_SENT: StdCell<Sent> = const { StdCell::new(NOTHING_SENT) };
+    /// Whether the crosshair was last shown or hidden.
+    static CROSSHAIR_VISIBLE: StdCell<Option<bool>> = const { StdCell::new(None) };
+    /// The drawing grid's plan, by the drawing and colour it shows.
+    static GRID_PLAN: RefCell<Option<GridPlan>> = const { RefCell::new(None) };
+    /// The pixel the grid's highlight was last put on (none: hidden), with Mirror and the
+    /// resolution: sent again only when one of them changes.
+    static GRID_CURSOR: StdCell<Option<GridCursor>> = const { StdCell::new(None) };
 }
 
 /// Mob hitboxes outlined around the player: within this many blocks of the eye, nearest first,
@@ -423,49 +473,100 @@ struct BlockOutline;
 
 impl Guest for BlockOutline {
     fn init() {
+        HUD_WRITES.with(|writes| writes.set(0));
         let text = settings::load();
-        let loaded = text.as_ref().map(|json| Settings::parse(json));
-        if let Ok(json) = &text {
-            restore_resets(json);
+        // The file is split into its fields once: every lookup in it used to scan the whole
+        // text, which cost most of `init`'s fuel.
+        let mut resets = None;
+        let loaded = text
+            .as_ref()
+            .map(|json| {
+                let fields = outline::Fields::new(json);
+                resets = fields.text_span("jump_reset_resets");
+                Settings::from_fields(&fields)
+            })
+            .map_err(String::clone);
+        if let (Ok(json), Some(span)) = (text, resets) {
+            restore_resets(json, span);
         }
         let settings = loaded.as_ref().copied().unwrap_or_default();
         set_settings(settings);
-        // May be refused before a world is joined; `draw_outline` retries until it succeeds.
-        upload_cube();
+        // The cube is not uploaded here: `init` is short of fuel and drawing may be refused until
+        // a world is joined anyway. `ensure_cube` uploads it in the first frame in a world.
         // The packer embeds the menu itself; the saved values are patched in by the first frame,
         // not here: `init` also runs when Cinnabar restarts the mod, and failing it then would
         // switch the mod off, so it stays well inside its fuel.
         reserve_keys(&settings);
-        match loaded {
+        let _ = match loaded {
             Ok(_) => show_label(&format!(
                 "Boldy Mods: press {} for the menu",
                 settings.menu_key.display()
             )),
             Err(error) => show_label(&format!("Boldy Mods: settings unavailable ({error})")),
-        }
+        };
     }
 
     fn frame() {
+        HUD_WRITES.with(|writes| writes.set(0));
         let start = budget::remaining_fuel();
+        FRAME_START.with(|at| at.set(start));
         frame_body();
         note_fuel(start);
     }
 }
 
-/// Takes the saved jump resets back from the settings file's text: the raw rows, not parsed, so
+thread_local! {
+    /// The fuel this callback started with: what [`headroom`] counts the frame's spending from.
+    static FRAME_START: StdCell<u64> = const { StdCell::new(0) };
+}
+
+/// What one frame may spend by this mod's own count. Cinnabar's allowance for a frame has been
+/// 200,000 and may be more (a world's first frame gets several times that); the mod's gates below
+/// are tuned for 200,000 and keep to it, so the work is spread the same way on any version and no
+/// frame takes more than its share of the host's time.
+const FRAME_CAP: u64 = 200_000;
+
+/// The fuel this frame may still spend: what the host has left, and what is left of
+/// [`FRAME_CAP`]. Use it instead of `budget::remaining_fuel` to decide whether a piece of
+/// optional work fits.
+fn headroom() -> u64 {
+    let left = budget::remaining_fuel();
+    let spent = FRAME_START.with(StdCell::get).saturating_sub(left);
+    left.min(FRAME_CAP.saturating_sub(spent))
+}
+
+thread_local! {
+    /// The saved resets' text as the settings file had it, until the first time they are needed
+    /// (a new reset, or a save): splitting it into rows at start used a fair share of `init`.
+    /// Apart from the block above, whose macro cannot take many more statics.
+    static JUMP_RESETS_RAW: RefCell<Option<(String, std::ops::Range<usize>)>> = const { RefCell::new(None) };
+}
+
+/// Takes the saved jump resets back from the settings file: the file's text and where the resets
+/// lie in it are only kept, and split into rows by [`resets_with`] when they are first needed, so
 /// the start costs little fuel.
-fn restore_resets(json: &str) {
-    let Some(text) = outline::text_field(json, "jump_reset_resets") else {
-        return;
-    };
-    let mut rows: Vec<String> = text
-        .split('/')
-        .filter(|row| !row.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let extra = rows.len().saturating_sub(jumpreset::RESETS_KEPT);
-    rows.drain(..extra);
-    JUMP_RESETS.with(|saved| *saved.borrow_mut() = rows);
+fn restore_resets(json: String, span: std::ops::Range<usize>) {
+    if !span.is_empty() {
+        JUMP_RESETS_RAW.with(|raw| *raw.borrow_mut() = Some((json, span)));
+    }
+}
+
+/// Gives `use_rows` the saved jump resets, splitting the text kept by [`restore_resets`] into rows
+/// first if that has not happened yet.
+fn resets_with<R>(use_rows: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    if let Some((json, span)) = JUMP_RESETS_RAW.with(|raw| raw.borrow_mut().take()) {
+        let mut rows: Vec<String> = json
+            .get(span)
+            .unwrap_or_default()
+            .split('/')
+            .filter(|row| !row.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let extra = rows.len().saturating_sub(jumpreset::RESETS_KEPT);
+        rows.drain(..extra);
+        JUMP_RESETS.with(|saved| *saved.borrow_mut() = rows);
+    }
+    JUMP_RESETS.with(|rows| use_rows(&mut rows.borrow_mut()))
 }
 
 /// Notes that feature `slot` used `used` fuel in one call.
@@ -534,6 +635,12 @@ fn frame_body() {
         s.set(s.get() + delta);
         s.get()
     });
+    // Every frame counts, also those that return early below.
+    FPS.with(|meter| {
+        let mut m = meter.get();
+        m.tick(delta);
+        meter.set(m);
+    });
     expire_label(seconds);
     // Like Simple Fullbright, ask for fullbright first thing in every frame: the host keeps
     // it only while callbacks succeed, so a request each frame keeps it on.
@@ -550,7 +657,16 @@ fn frame_body() {
     {
         return;
     }
-    if MENU_STALE.with(StdCell::get) {
+    let menu_open = controls.as_ref().is_some_and(|c| c.panel_open);
+    // The saved values are patched into the menu when it is open, so it never shows the packed
+    // defaults. A closed menu is patched in a frame of its own once the HUD and the outline's
+    // geometry are up: with them all in the first frame of a world it came to over twice what a
+    // frame is meant to spend.
+    if MENU_STALE.with(StdCell::get)
+        && (menu_open || startup_done())
+        && !HEAVY_FRAME.with(StdCell::get)
+        && headroom() >= MENU_PATCH_RESERVE
+    {
         MENU_STALE.with(|stale| stale.set(false));
         HEAVY_FRAME.with(|heavy| heavy.set(true));
         let settings = settings();
@@ -562,7 +678,6 @@ fn frame_body() {
         }
     }
 
-    let menu_open = controls.as_ref().is_some_and(|c| c.panel_open);
     MENU_OPEN.with(|open| open.set(menu_open));
     // Holding attack in gameplay mines the block; the fill would cover its cracks.
     timed(S_KEYS, || refresh_attack_keys(seconds));
@@ -593,6 +708,7 @@ fn frame_body() {
                 Vec::new()
             };
             apply_menu_events(controls, &text, seconds);
+            draw_frame(controls);
         }
     });
     // Before the early returns below: the host keeps the counter on screen, patched here.
@@ -611,7 +727,16 @@ fn frame_body() {
     timed(S_ARROW, || {
         arrow_counter(controls.as_ref(), seconds, hud_size)
     });
-    timed(S_CPS, || cps_frame(controls.as_ref(), seconds, hud_size));
+    // Before the other HUD elements, which cost little: a changed crosshair or drawing grid is
+    // the costliest patch, and needs the most fuel left.
+    timed(S_CROSSHAIR, || {
+        draw_grid_frame(controls.as_ref());
+        crosshair_frame(controls.as_ref(), hud_size);
+    });
+    timed(S_CPS, || {
+        cps_frame(controls.as_ref(), seconds, hud_size);
+        fps_frame(seconds, hud_size);
+    });
     timed(S_JUMP, || {
         jump_reset_frame(controls.as_ref(), delta, seconds, session);
     });
@@ -649,7 +774,7 @@ fn frame_body() {
         }
         // Reading a crowd (up to 16 players on a server hub) costs a fair share of a
         // frame; after a costly terrain read, the last frame's actors do.
-        let (actors, hittable) = if budget::remaining_fuel() >= ACTOR_RESERVE {
+        let (actors, hittable) = if headroom() >= ACTOR_RESERVE {
             timed(S_ACTORS, || nearby_actor_boxes(eye))
         } else {
             LAST_ACTORS.with(|last| std::mem::take(&mut *last.borrow_mut()))
@@ -717,6 +842,18 @@ fn frame_body() {
     });
 }
 
+/// Fuel a frame needs left to patch the menu with the settings: the patch costs about 160,000.
+const MENU_PATCH_RESERVE: u64 = 175_000;
+/// Fuel a frame needs left to upload the outline's geometry (18 pieces, about 2,300 each).
+const CUBE_RESERVE: u64 = 70_000;
+
+/// Whether the heavy start-up work is done: the HUD layer is published and the outline's
+/// geometry is uploaded. Each of them takes a frame to itself, the menu patch the one after.
+fn startup_done() -> bool {
+    HUD_PUBLISHED.with(StdCell::get)
+        && CUBE.with(|cube| cube.borrow().len() == outline::EDGES.len())
+}
+
 /// Fuel a frame may use before the mod says so: the host allows 200,000 and quarantines the mod
 /// after three frames that run out.
 const FUEL_WARN: u64 = 150_000;
@@ -733,7 +870,14 @@ fn note_fuel(start: u64) {
         peak.set(peak.get().max(used));
         peak.get()
     });
-    if used > FUEL_WARN {
+    // A frame that took a heavy job to itself is allowed up to the cap; any other is reported
+    // over `FUEL_WARN`.
+    let limit = if HEAVY_FRAME.with(StdCell::get) {
+        FRAME_CAP
+    } else {
+        FUEL_WARN
+    };
+    if used > limit {
         report_once("Boldy Mods: a frame used over 150k of its 200k fuel");
     }
     // Every so often, with fuel to spare and the menu closed, write the numbers down.
@@ -741,7 +885,7 @@ fn note_fuel(start: u64) {
     if PROFILE
         && now - FUEL_SAVED_AT.with(StdCell::get) >= FUEL_SAVE_EVERY
         && !MENU_OPEN.with(StdCell::get)
-        && budget::remaining_fuel() >= REPORT_RESERVE
+        && headroom() >= REPORT_RESERVE
     {
         FUEL_SAVED_AT.with(|at| at.set(now));
         save_settings(&settings());
@@ -868,10 +1012,109 @@ fn back_to_start_when_closed(controls: &input::Controls, seconds: f32) {
         focus: None,
         moving: false,
         moving_cps: false,
+        moving_fps: false,
+        drawing: false,
+        draw_full: false,
         ..state
     };
     MENU.with(|m| m.set(state));
     push_menu(seconds, state);
+}
+
+/// Where the pointer is on the menu's card: hover help works it out first, every frame it moves.
+fn card_pointer(controls: &input::Controls) -> Option<[f32; 2]> {
+    HOVER_LOOKUP
+        .with(StdCell::get)
+        .and_then(|((pointer, _, _), point, _)| {
+            point.filter(|_| pointer.is_some() && pointer == controls.pointer)
+        })
+}
+
+/// Fuel a painting frame keeps for itself beyond finding the drawing's rectangles.
+const DRAW_SPARE: u64 = 40_000;
+
+/// Fuel a frame needs left to save the settings file: about 65,000, and up to 40,000 more to
+/// write out a 64 by 64 drawing.
+const SAVE_RESERVE: u64 = 140_000;
+
+/// Drawing on the Crosshair page's grid: holding the left button over it draws the pixels the
+/// pointer passes, and holding the right button erases them. With both held, the one pressed
+/// last wins. With Mirror on, every pixel is painted in all four quarters. A pixel that would make the
+/// drawing too detailed to send is refused, and the help line says so. The grid (the HUD's
+/// `drawgrid`, which the menu embeds) follows in `draw_grid_frame`; the settings file is
+/// written when the stroke ends.
+fn draw_frame(controls: &input::Controls) {
+    let mut state = MENU.with(StdCell::get);
+    let is = |keys: &[String], name: &str| keys.iter().any(|key| key == name);
+    let (left_held, right_held) = (
+        is(&controls.keys_held, "MouseLeft"),
+        is(&controls.keys_held, "MouseRight"),
+    );
+    let (left_pressed, right_pressed) = (
+        is(&controls.keys_pressed, "MouseLeft"),
+        is(&controls.keys_pressed, "MouseRight"),
+    );
+    let held = left_held || right_held;
+    let pressed = left_pressed || right_pressed;
+    let drawing = controls.panel_open
+        && state.page == panel::Page::Crosshair
+        && state.drawing
+        && state.typing.is_none();
+    if !drawing || !(held || pressed) {
+        DRAW_STROKE.with(|stroke| stroke.set(None));
+        if SETTINGS_UNSAVED.with(StdCell::get) && headroom() >= SAVE_RESERVE {
+            SETTINGS_UNSAVED.with(|unsaved| unsaved.set(false));
+            save_settings(&settings());
+        }
+        return;
+    }
+    let point = card_pointer(controls);
+    let mut settings = settings();
+    let look = settings.crosshair;
+    let Some((row, col)) = point.and_then(|point| panel::draw_cell(point, look.pixels.size()))
+    else {
+        return;
+    };
+    // Left draws, right erases: a button pressed now decides, else the one still held. A new
+    // stroke (or the other button) starts here; else the line goes on from the last pixel.
+    let stroke = DRAW_STROKE.with(StdCell::get);
+    let (on, from) = if left_pressed {
+        (true, (row, col))
+    } else if right_pressed {
+        (false, (row, col))
+    } else {
+        match stroke {
+            Some((on, last)) if (on && left_held) || (!on && right_held) => (on, last),
+            _ => (left_held, (row, col)),
+        }
+    };
+    let pixels = look.pixels.painted_line(from, (row, col), on, look.mirror);
+    if pixels == look.pixels {
+        DRAW_STROKE.with(|cell| cell.set(Some((on, (row, col)))));
+        return;
+    }
+    // Telling whether it is too detailed means finding its rectangles, which a large drawing
+    // pays for: only with the fuel for it. The pointer is still there next frame.
+    if headroom() < crosshair::rects_cost(&pixels) + DRAW_SPARE {
+        return;
+    }
+    let refused = crosshair::too_detailed(&pixels);
+    if refused != state.draw_full {
+        // Only the help line changes in the menu: the grid is the HUD's, sent in
+        // `draw_grid_frame`.
+        state.draw_full = refused;
+        MENU.with(|menu| menu.set(state));
+        let _ = host_panel::update_content(&panel::draw_update(&settings, state));
+    }
+    if refused {
+        return;
+    }
+    // Only now does the line move on: a frame that could not paint leaves it to the next.
+    DRAW_STROKE.with(|cell| cell.set(Some((on, (row, col)))));
+    settings.crosshair.pixels = pixels;
+    settings.crosshair.style = crosshair::CUSTOM;
+    set_settings(settings);
+    SETTINGS_UNSAVED.with(|unsaved| unsaved.set(true));
 }
 
 /// Captures a new menu key while the "Menu key" button waits for one; otherwise opens or closes
@@ -975,7 +1218,7 @@ fn save_settings(settings: &Settings) {
     // before the resets.
     let report = fuel_report();
     let mut room = mod_api::MAX_SETTINGS_BYTES.saturating_sub(json.len() + report.len() + 600);
-    let resets = JUMP_RESETS.with(|rows| jumpreset::joined_within(&rows.borrow(), room));
+    let resets = resets_with(|rows| jumpreset::joined_within(rows, room));
     room = room.saturating_sub(resets.len());
     let traces = JUMP_TRACES.with(|rows| jumpreset::joined_within(&rows.borrow(), room));
     let mut extras = String::new();
@@ -1279,7 +1522,9 @@ fn apply_menu_events(controls: &input::Controls, text: &[input::TextEvent], seco
             // The zoom key is reserved only while the zoom is on.
             reserve_keys(&settings);
         }
-        save_settings(&settings);
+        // Saved in a frame with the fuel for it: this one has the menu's redraw to pay for,
+        // and a large drawing to rescale or write out costs a lot more.
+        SETTINGS_UNSAVED.with(|unsaved| unsaved.set(true));
     }
     push_menu_with(seconds, &settings, state, true);
     // The update hid the highlight and help; forget them so the next frame shows them again
@@ -1602,18 +1847,38 @@ fn boxes_of<'a>(
 /// Checked about five times a second, not every frame: the reply lists every HUD element by
 /// name, which costs fuel to read.
 fn hud_hidden() -> bool {
+    hud_elements_read(0.2).0
+}
+
+/// Whether the game would draw its own crosshair now, hidden by this mod or not: not with the
+/// HUD hidden (F1), in third person or on the death screen. The custom crosshair follows it, so
+/// it is checked more often than [`hud_hidden`], ten times a second. Without the HUD
+/// permission it counts as shown.
+fn vanilla_crosshair_shown() -> bool {
+    hud_elements_read(0.1).1
+}
+
+/// The game's HUD elements, read again once the last read is `max_age` seconds old: whether
+/// they are all hidden, and whether the crosshair is shown.
+fn hud_elements_read(max_age: f32) -> (bool, bool) {
     let seconds = SECONDS.with(StdCell::get);
-    let (hidden, checked_at) = HUD_HIDDEN.with(StdCell::get);
-    if (seconds - checked_at).abs() < 0.2 {
-        return hidden;
+    let (hidden, crosshair, checked_at) = HUD_HIDDEN.with(StdCell::get);
+    if (seconds - checked_at).abs() < max_age {
+        return (hidden, crosshair);
     }
-    let hidden = crate::arena::scratch(hud::read_elements, |elements| {
-        elements.as_ref().is_ok_and(|elements| {
-            !elements.is_empty() && elements.iter().all(|element| !element.visible)
-        })
-    });
-    HUD_HIDDEN.with(|cell| cell.set((hidden, seconds)));
-    hidden
+    let (hidden, crosshair) =
+        crate::arena::scratch(hud::read_elements, |elements| match elements {
+            Ok(elements) => (
+                !elements.is_empty() && elements.iter().all(|element| !element.visible),
+                elements
+                    .iter()
+                    .find(|element| element.element == hud::VanillaElement::Crosshair)
+                    .is_none_or(|element| element.visible),
+            ),
+            Err(_) => (false, true),
+        });
+    HUD_HIDDEN.with(|cell| cell.set((hidden, crosshair, seconds)));
+    (hidden, crosshair)
 }
 
 /// Lifts the lines just off the block faces so the depth test does not let the faces cut into
@@ -1626,7 +1891,12 @@ const INFLATE: f64 = 0.003;
 fn ensure_cube(seconds: f32) {
     let missing = CUBE.with(|cube| cube.borrow().len() != outline::EDGES.len())
         || FACE_QUADS.with(|faces| faces.borrow().len() != outline::FACES.len());
-    if !missing || seconds < UPLOAD_RETRY_AT.with(StdCell::get) {
+    // In a frame to itself: after the HUD layer or the menu patch, a later frame uploads it.
+    if !missing
+        || seconds < UPLOAD_RETRY_AT.with(StdCell::get)
+        || HEAVY_FRAME.with(StdCell::get)
+        || headroom() < CUBE_RESERVE
+    {
         return;
     }
     UPLOAD_RETRY_AT.with(|at| at.set(seconds + 0.25));
@@ -1722,7 +1992,7 @@ fn draw_outlines(shapes: &[Shape], dimension: i32, camera: [f64; 3], seconds: f3
                     .chain(0..shapes.len().saturating_sub(1));
                 for (drawn, index) in order.enumerate() {
                     let needed = DRAW_RESERVE + SEND_FUEL * (instances.len() as u64 + 16);
-                    if drawn > 0 && budget::remaining_fuel() < needed {
+                    if drawn > 0 && headroom() < needed {
                         break;
                     }
                     let (shape, segments) = (&shapes[index], &segments[index]);
@@ -1916,7 +2186,7 @@ fn refresh_terrain(eye: [f64; 3], dir: [f64; 3], reach: f32, frame_session: u64)
     // again soon.
     if let Some(per_cell) = per_cell {
         let needed = per_cell * cells as f64 + READ_RESERVE;
-        if (budget::remaining_fuel() as f64) < needed {
+        if (headroom() as f64) < needed {
             READ_COST.with(|cost| cost.set(Some(per_cell * 0.98)));
             return;
         }
@@ -2052,17 +2322,38 @@ fn shape_boxes(blocks: &Blocks, shape: u32) -> Vec<[f64; 6]> {
         .collect()
 }
 
-fn show_label(text: &str) {
+/// The most HUD writes this mod makes in one callback. Cinnabar allows 8 and quarantines a mod
+/// that makes a ninth, so one is kept in hand: a write held back here is made in a later frame.
+const HUD_WRITE_LIMIT: u32 = 7;
+
+/// Counts one HUD write (a surface, a patch, the hidden elements or the label), or returns
+/// false when this callback has made all it may.
+fn hud_write() -> bool {
+    HUD_WRITES.with(|writes| {
+        let made = writes.get();
+        if made >= HUD_WRITE_LIMIT {
+            return false;
+        }
+        writes.set(made + 1);
+        true
+    })
+}
+
+/// Shows `text` on the HUD for a while; false when it could not (no HUD write left this frame,
+/// or no permission).
+fn show_label(text: &str) -> bool {
     let text: String = text.chars().filter(|c| !c.is_control()).take(120).collect();
-    if hud::set_label(&text).is_ok() {
+    if hud_write() && hud::set_label(&text).is_ok() {
         let now = SECONDS.with(StdCell::get);
         LABEL_UNTIL.with(|until| until.set(Some(now + LABEL_SECONDS)));
+        return true;
     }
+    false
 }
 
 fn expire_label(seconds: f32) {
     let expired = LABEL_UNTIL.with(|until| until.get().is_some_and(|t| seconds >= t));
-    if expired && hud::set_label("").is_ok() {
+    if expired && hud_write() && hud::set_label("").is_ok() {
         LABEL_UNTIL.with(|until| until.set(None));
     }
 }
@@ -2073,8 +2364,9 @@ fn report_once(text: &str) {
     let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
     });
-    if REPORTED_ERROR.with(|r| r.replace(hash)) != hash {
-        show_label(text);
+    // Counted as reported only once it was shown: a frame out of HUD writes tries again later.
+    if REPORTED_ERROR.with(StdCell::get) != hash && show_label(text) {
+        REPORTED_ERROR.with(|r| r.set(hash));
     }
 }
 

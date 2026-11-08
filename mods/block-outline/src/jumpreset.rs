@@ -187,8 +187,79 @@ impl Log {
         out
     }
 
-    /// Reads [`Log::to_text`] back, skipping what does not parse.
+    /// Reads [`Log::to_text`] back, skipping what does not parse. In one pass over the bytes
+    /// when the text is in the usual form: the general reader below costs about 1,500 fuel a
+    /// row, and this runs in `init`, where the whole allowance is 200,000.
     pub fn parse(text: &str) -> Self {
+        Self::parse_fast(text).unwrap_or_else(|| Self::parse_general(text))
+    }
+
+    /// [`Log::parse`] for text made only of what [`Log::to_text`] writes (digits, `-`, `x`, `,`
+    /// and `;`) with every row complete; `None` for anything else.
+    fn parse_fast(text: &str) -> Option<Self> {
+        let mut log = Self::new();
+        let mut at = 0;
+        let bytes = text.as_bytes();
+        while at < bytes.len() {
+            let offset = Self::number(bytes, &mut at, b',')?;
+            let knockback = Self::number(bytes, &mut at, b',')?;
+            let grounded = match bytes.get(at)? {
+                b'1' => Some(true),
+                b'0' => Some(false),
+                b'x' => None,
+                _ => return None,
+            };
+            at += 1;
+            if bytes.get(at) != Some(&b',') {
+                return None;
+            }
+            at += 1;
+            let speed = Self::number(bytes, &mut at, b';')?;
+            log.push(Row {
+                offset_ms: offset.and_then(|ms| i16::try_from(ms).ok()),
+                knockback: u16::try_from(knockback?).ok()?,
+                grounded,
+                speed: u16::try_from(speed?).ok()?,
+            });
+        }
+        Some(log)
+    }
+
+    /// The number at `*at` up to `end` (or the end of the text), moving `*at` past `end`. The
+    /// outer `None` is text this reader does not take; an inner `None` is the `x` of no jump.
+    fn number(bytes: &[u8], at: &mut usize, end: u8) -> Option<Option<i32>> {
+        let start = *at;
+        let negative = bytes.get(start) == Some(&b'-');
+        let mut at_digit = start + usize::from(negative);
+        if bytes.get(at_digit) == Some(&b'x') && !negative {
+            at_digit += 1;
+            if bytes.get(at_digit).is_some_and(|&byte| byte != end) {
+                return None;
+            }
+            *at = at_digit + 1;
+            return Some(None);
+        }
+        let first = at_digit;
+        let mut value = 0i32;
+        while let Some(&byte) = bytes.get(at_digit) {
+            if byte == end {
+                break;
+            }
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+            value = value.checked_mul(10)?.checked_add(i32::from(byte - b'0'))?;
+            at_digit += 1;
+        }
+        if at_digit == first {
+            return None;
+        }
+        *at = at_digit + 1;
+        Some(Some(if negative { -value } else { value }))
+    }
+
+    /// [`Log::parse`] for any text, skipping what does not parse.
+    fn parse_general(text: &str) -> Self {
         let mut log = Self::new();
         for part in text.split(';') {
             let mut fields = part.split(',');
@@ -1480,6 +1551,34 @@ mod tests {
         assert_eq!(odd.rows()[0].knockback, 5);
         assert_eq!(odd.rows()[1].offset_ms, None);
         assert_eq!(Log::parse("").rows().len(), 0);
+    }
+
+    #[test]
+    fn the_fast_log_reader_agrees_with_the_general_one() {
+        for text in [
+            "",
+            "x,0,x,0",
+            "210,346,0,124;x,28,1,92;-222,362,0,188;x,0,0,0;",
+            "-32768,65535,1,65535;32767,0,0,0",
+            "junk;1,2;x,5,1,7",
+            "40000,3,0,4;-40000,3,0,4",
+            "1,2,3,4",
+            "1,-2,0,4",
+            "1,x,0,4",
+            "1,2,0,70000",
+            "1,2,0,4;;5,6,1,7",
+            "-,2,0,4",
+            "+5,2,0,4",
+            "5,2,1",
+            "5,2,1,",
+            "99999999999,2,0,4",
+        ] {
+            if let Some(fast) = Log::parse_fast(text) {
+                assert_eq!(fast, Log::parse_general(text), "{text}");
+            }
+            assert_eq!(Log::parse(text), Log::parse_general(text), "{text}");
+        }
+        assert!(Log::parse_fast("210,346,0,124;x,28,1,92").is_some());
     }
 
     #[test]

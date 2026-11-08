@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     append_section(
         &mut component,
         "description",
-        b"Outlines the block or mob you aim at in your own colours, with a movable arrow counter, a smooth scroll zoom and a fullbright switch. Press F8 for the menu.",
+        b"Outlines the block or mob you aim at in your own colours, with a movable arrow counter, a smooth scroll zoom, a fullbright switch and a crosshair of your own. Press F8 for the menu.",
     );
     append_section(
         &mut component,

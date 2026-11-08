@@ -1,5 +1,5 @@
-//! The HUD editor's logic: the arrow counter and the CPS readout both show their frames; one
-//! drag moves or resizes one of them. Host-independent, so `cargo test` can check grabbing,
+//! The HUD editor's logic: the arrow counter, the CPS readout and the FPS counter all show their
+//! frames; one drag moves or resizes one of them. Host-independent, so `cargo test` can check grabbing,
 //! dragging, snapping, resizing and which element takes the keys.
 
 use crate::counter::{self, Counter, Drag, Edit, Part, Pos};
@@ -43,18 +43,18 @@ pub fn resize_steps(wheel: f32, keys: &[String]) -> f32 {
 /// The editor's state between frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Editor {
-    /// The element grabbed last (0 the arrow counter, 1 the CPS readout): on top when they
-    /// overlap, and the one the keys act on when the pointer is over neither.
+    /// The element grabbed last (0 the arrow counter, 1 the CPS readout, 2 the FPS counter): on
+    /// top when they overlap, and the one the keys act on when the pointer is over none.
     pub selected: usize,
     /// The drag in progress: the element, the part grabbed and how.
     pub drag: Option<(usize, Part, Drag)>,
 }
 
 /// What one frame of editing shows.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Output {
-    /// How each element's frame looks: the arrow counter's, then the CPS readout's.
-    pub edits: [Edit; 2],
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Output<const N: usize> {
+    /// How each element's frame looks, in the order of the items.
+    pub edits: [Edit; N],
     /// Something is in the way of the guide box at the top of the screen.
     pub guide_blocked: bool,
 }
@@ -62,20 +62,23 @@ pub struct Output {
 impl Editor {
     /// One frame. `items` are moved and resized in place; `bases` are the elements' sizes at
     /// scale 1; `guide` is the width and height the guide box takes at the top of the screen.
-    pub fn step(
+    pub fn step<const N: usize>(
         &mut self,
-        items: &mut [Item; 2],
-        bases: [[f32; 2]; 2],
+        items: &mut [Item; N],
+        bases: [[f32; 2]; N],
         viewport: [f32; 2],
         input: Input,
         guide: [f32; 2],
-    ) -> Output {
+    ) -> Output<N> {
+        if self.selected >= N {
+            self.selected = 0;
+        }
         let scaled = |index: usize, scale: f32| bases[index].map(|side| side * scale);
-        let rect = |items: &[Item; 2], index: usize| {
+        let rect = |items: &[Item; N], index: usize| {
             let size = scaled(index, items[index].scale);
             (counter::place(items[index].pos, size, viewport), size)
         };
-        let mut edits = [Edit::default(); 2];
+        let mut edits = [Edit::default(); N];
         let mut guides = [None; 2];
         let mut under = None;
         if !input.held {
@@ -83,7 +86,8 @@ impl Editor {
         }
         if let Some(pointer) = input.pointer {
             // What is under the pointer, the selected element first.
-            for index in [self.selected, 1 - self.selected] {
+            let selected = self.selected;
+            for index in core::iter::once(selected).chain((0..N).filter(|&i| i != selected)) {
                 let (corner, size) = rect(items, index);
                 if let Some(part) = counter::hit(pointer, corner, size) {
                     under = Some((index, part));
@@ -181,7 +185,7 @@ mod tests {
         }
     }
 
-    fn step(editor: &mut Editor, items: &mut [Item; 2], input: Input) -> Output {
+    fn step(editor: &mut Editor, items: &mut [Item; 2], input: Input) -> Output<2> {
         editor.step(items, BASES, VIEWPORT, input, GUIDE)
     }
 
@@ -254,6 +258,35 @@ mod tests {
         editor.selected = 1;
         step(&mut editor, &mut items, mouse(inside, true, true));
         assert_eq!(editor.drag.map(|(index, ..)| index), Some(1));
+    }
+
+    #[test]
+    fn a_third_element_is_grabbed_and_moved_on_its_own() {
+        // The FPS counter, a line below the CPS readout.
+        let fps = Item {
+            pos: crate::fps::DEFAULT_POS,
+            scale: 1.0,
+        };
+        let [counter, cps] = items();
+        let mut items = [counter, cps, fps];
+        let bases = [BASES[0], BASES[1], [40.0, 10.0]];
+        let mut editor = Editor::default();
+        let at = |items: &[Item; 3]| counter::place(items[2].pos, bases[2], VIEWPORT);
+        let from = at(&items);
+        let grab = [from[0] + 20.0, from[1] + 5.0];
+        let out = editor.step(&mut items, bases, VIEWPORT, mouse(grab, true, true), GUIDE);
+        assert_eq!(editor.selected, 2);
+        assert!(out.edits[2].dragging.is_some() && out.edits[1].dragging.is_none());
+        editor.step(
+            &mut items,
+            bases,
+            VIEWPORT,
+            mouse([grab[0] + 100.0, grab[1] + 60.0], false, true),
+            GUIDE,
+        );
+        let to = at(&items);
+        assert!((to[0] - (from[0] + 100.0)).abs() < SNAP_SLACK, "{to:?}");
+        assert_eq!((items[0], items[1]), (counter, cps));
     }
 
     #[test]

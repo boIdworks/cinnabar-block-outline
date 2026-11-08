@@ -192,7 +192,10 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("reset", Reset::Page, "Reset page"),
         ("counter_reset", Reset::Counter, "Reset place and size"),
         ("cps_reset", Reset::Cps, "Reset place and size"),
+        ("fps_reset", Reset::Fps, "Reset place and size"),
         ("zoom_reset", Reset::Zoom, "Reset zoom"),
+        ("crosshair_reset", Reset::Crosshair, "Reset crosshair"),
+        ("crosshair_clear", Reset::Drawing, "Clear drawing"),
     ] {
         let asking = state.confirm == asked;
         out.push_str("\"#");
@@ -267,6 +270,17 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     digits(&mut size, (cps.scale * 100.0).round().max(0.0) as u64);
     size.push_str("%%");
     toggle(out, "cps_size", &size, false);
+    let fps = settings.fps;
+    toggle(
+        out,
+        "fps_on",
+        if fps.on { "FPS: On" } else { "FPS: Off" },
+        fps.on,
+    );
+    let mut size = String::from("Size: ");
+    digits(&mut size, (fps.scale * 100.0).round().max(0.0) as u64);
+    size.push_str("%%");
+    toggle(out, "fps_size", &size, false);
     let jump = settings.jump_reset;
     toggle(
         out,
@@ -282,6 +296,72 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     digits(&mut window, u64::from(jump.window));
     window.push_str(" ms");
     toggle(out, "jump_window", &window, false);
+    let crosshair = settings.crosshair;
+    toggle(out, "crosshair_on", "", crosshair.on);
+    toggle(out, "crosshair_outline", "", crosshair.outline);
+    toggle(out, "crosshair_mirror", "", crosshair.mirror);
+    // A drawing's pixels are sized in screen pixels, and it has no length or gap of its own.
+    let custom = crosshair.style == crate::crosshair::CUSTOM;
+    // Beside the Colour button there is room for the size alone: clicking it goes back to 16.
+    let mut text = String::new();
+    let size = crosshair.pixels.size() as u64;
+    digits(&mut text, size);
+    text.push('x');
+    digits(&mut text, size);
+    toggle(out, "crosshair_res", &text, false);
+    out.push_str(r##""#crosshair_res_reset":"","##);
+    toggle(
+        out,
+        "crosshair_colour",
+        "Colour",
+        state.page == Page::Crosshair && state.colour_open,
+    );
+    let defaults = crate::crosshair::DEFAULT;
+    for (name, caption, _, _) in CROSS_VALUES {
+        let mut text = String::from(match name {
+            "crosshair_thickness" if custom => "Pixel size",
+            _ => caption,
+        });
+        text.push_str(": ");
+        let changed = match name {
+            "crosshair_length" | "crosshair_gap" if custom => {
+                text.push_str("not used by a drawing");
+                false
+            }
+            "crosshair_style" => {
+                text.push_str(crate::crosshair::style_name(crosshair.style));
+                crosshair.style != defaults.style
+            }
+            "crosshair_length" => {
+                fixed(&mut text, crosshair.length);
+                crosshair.length != defaults.length
+            }
+            "crosshair_thickness" if custom => {
+                digits(&mut text, u64::from(crosshair.pixel_size));
+                text.push_str(" px");
+                crosshair.pixel_size != defaults.pixel_size
+            }
+            "crosshair_thickness" => {
+                fixed(&mut text, crosshair.thickness);
+                crosshair.thickness != defaults.thickness
+            }
+            "crosshair_gap" => {
+                fixed(&mut text, crosshair.gap);
+                crosshair.gap != defaults.gap
+            }
+            _ => {
+                digits(&mut text, u64::from(crosshair.opacity));
+                text.push_str("%%");
+                crosshair.opacity != defaults.opacity
+            }
+        };
+        toggle(out, name, &text, false);
+        out.push_str("\"#");
+        out.push_str(name);
+        out.push_str("_reset\":\"");
+        out.push_str(if changed { "reset" } else { "" });
+        out.push_str("\",");
+    }
     let zoom = settings.zoom;
     toggle(
         out,
@@ -354,6 +434,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("zoom_step", zoom.step != defaults.step),
         ("counter_size", counter.scale != 1.0),
         ("cps_size", cps.scale != 1.0),
+        ("fps_size", fps.scale != 1.0),
         (
             "jump_window",
             jump.window != crate::jumpreset::DEFAULT_WINDOW,
@@ -373,6 +454,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     // The start page's Arrow counter button: an arrow-shaft brown stripe.
     out.push_str(r##","#open_counter_color":[0.82,0.68,0.47,1],"##);
     // The CPS button's mouse and the Lighting button's sun.
+    out.push_str(r##""#open_fps_color":[0.75,0.62,1,1],"##);
     out.push_str(r##""#open_cps_color":[0.6,0.9,0.65,1],"#open_light_color":[1,0.88,0.45,1],"##);
     // The Jump reset button's arrow.
     out.push_str(r##""#open_jump_color":[1,0.55,0.5,1],"##);
@@ -381,9 +463,11 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     toggle(out, "home_mob", "", settings.mob_on);
     toggle(out, "home_counter", "", counter.on);
     toggle(out, "home_cps", "", cps.on);
+    toggle(out, "home_fps", "", fps.on);
     toggle(out, "home_zoom", "", zoom.on);
     toggle(out, "home_light", "", settings.fullbright);
     toggle(out, "home_jump", "", jump.on);
+    toggle(out, "home_crosshair", "", crosshair.on);
     out.push_str(r##""#fuel_text":""##);
     fuel_text(out, state);
     out.push_str(r##"","#title_text":""##);
@@ -394,11 +478,17 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         Page::Mob => "Mob hitbox",
         Page::Counter => "Arrow counter",
         Page::Cps => "CPS counter",
+        Page::Fps => "FPS counter",
         Page::Zoom => "Zoom",
         Page::Lighting => "Lighting",
         Page::JumpReset => "Jump reset",
+        Page::Crosshair => "Crosshair",
     };
-    if state.page.outline() && state.colour_open {
+    if state.page == Page::Crosshair && state.colour_open {
+        out.push_str("Crosshair > Colour");
+    } else if state.page == Page::Crosshair && state.drawing {
+        out.push_str("Crosshair > Draw");
+    } else if state.page.outline() && state.colour_open {
         out.push_str(if state.page == Page::Mob {
             "Mob"
         } else {
@@ -437,9 +527,32 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     );
     flag(out, "counter_page_visible", state.page == Page::Counter);
     flag(out, "cps_page_visible", state.page == Page::Cps);
+    flag(out, "fps_page_visible", state.page == Page::Fps);
     flag(out, "zoom_page_visible", state.page == Page::Zoom);
     flag(out, "light_page_visible", state.page == Page::Lighting);
     flag(out, "jump_page_visible", state.page == Page::JumpReset);
+    flag(
+        out,
+        "crosshair_page_visible",
+        state.page == Page::Crosshair && !state.colour_open && !state.drawing,
+    );
+    flag(
+        out,
+        "draw_page_visible",
+        state.page == Page::Crosshair && state.drawing,
+    );
+    // Only while the grid shows: its pixels cost a lot to write, and every menu update would
+    // otherwise pay for them.
+    if state.page == Page::Crosshair && state.drawing {
+        draw_bindings(out, settings, state);
+        out.push(',');
+    }
+    flag(out, "crosshair_top_visible", state.page == Page::Crosshair);
+    flag(
+        out,
+        "crosshair_draw_button_visible",
+        state.page == Page::Crosshair && !state.drawing,
+    );
     flag(out, "card_visible", !state.moving);
     flag(
         out,
@@ -464,7 +577,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     out.push_str(r##","#mob_top_visible":"##);
     out.push_str(if mob { "true" } else { "false" });
     out.push_str(r##","#colour_visible":"##);
-    out.push_str(if outline && state.colour_open {
+    out.push_str(if state.page.has_colour() && state.colour_open {
         "true"
     } else {
         "false"
