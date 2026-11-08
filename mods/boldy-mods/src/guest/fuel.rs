@@ -201,3 +201,6 @@ pub(super) fn note_fuel(start: u64) {
     MENU.with(|menu| menu.set(state));
     let _ = host_panel::update_content(&panel::fuel_update(state));
 }
+
+#[cfg(test)]
+mod tests;

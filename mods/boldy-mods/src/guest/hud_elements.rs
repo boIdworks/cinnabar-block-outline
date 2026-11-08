@@ -894,3 +894,6 @@ fn refresh_quiver() {
     // Keyed by the revision checked above: a change since then is caught next frame.
     QUIVER.with(|q| q.set(counted.map(|quiver| (revisions.session, revisions.equipment, quiver))));
 }
+
+#[cfg(test)]
+mod tests;

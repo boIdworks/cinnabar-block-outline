@@ -13,8 +13,9 @@ module into a validated Cinnabar component (`scripts/build-mod.py`, `scripts/bui
 ## The one rule: logic is host-independent, the guest is thin
 
 Anything that can be written without Cinnabar's bindings is, so `cargo test` exercises it natively.
-Only the `guest` modules (compiled for wasm only) call the host. That is why most of the code is
-testable and the wasm-only part is a few thousand lines of glue.
+Only the `guest` modules call the host. They compile natively too (so clippy and the tests see them),
+but the host calls only work inside Cinnabar, so tests cover just the helpers around them. That is why
+most of the code is testable and the part that is not is thin glue.
 
 ### `mods/boldy-mods/src`
 
@@ -28,7 +29,7 @@ testable and the wasm-only part is a few thousand lines of glue.
 | `zoom.rs` | smooth zoom, scroll steps | yes |
 | `panel/` | the F8 menu: `ids` and `metrics` (control ids and layout constants), `layout/` (widgets, pages, sections), `controls/` (the control table, `nav` for keyboard focus), `events` (what clicks and typing change), `bindings` (live captions and colours), `content` (the full document and its patches), `help` (hover help) | yes |
 | `arena.rs` | bump allocator for big host replies (see below) | yes |
-| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements) | no (wasm only) |
+| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements) | only the helpers that do not call the host (terrain lookup, targeting, crosshair send order, fuel report); the host calls themselves run only in the game |
 | `host_dump.rs` | writes every document the mod can send, for `scripts/check-host.py` | test-only |
 
 ### `mods/hive-autocs/src`

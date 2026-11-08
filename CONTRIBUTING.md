@@ -18,7 +18,7 @@ python scripts\jump-reset-report.py --self-test
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of these on every push and pull request. The wasm clippy
-run matters: the `guest` modules compile only for wasm, so the native run does not see them.
+run still matters: it checks the code exactly as it ships.
 
 After changing anything the mod sends to the HUD or the menu, run `scripts\check-host.py`. Unit
 tests alone do not catch a refused patch; see [docs/architecture.md](docs/architecture.md).

@@ -84,3 +84,7 @@ on every push.
 - [CONTRIBUTING.md](CONTRIBUTING.md): build, checks and rules for changes.
 - [docs/architecture.md](docs/architecture.md): module map, the per-frame fuel budget that shapes
   the design, and how the host check works.
+
+## License
+
+[MIT](LICENSE).

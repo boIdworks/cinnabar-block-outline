@@ -742,3 +742,6 @@ pub(super) fn shape_boxes(blocks: &Blocks, shape: u32) -> Vec<[f64; 6]> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

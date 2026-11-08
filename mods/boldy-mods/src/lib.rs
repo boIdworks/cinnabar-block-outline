@@ -4,7 +4,6 @@ pub mod counter;
 pub mod cps;
 pub mod crosshair;
 pub mod fps;
-#[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(test)]
 mod host_dump;
