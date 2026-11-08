@@ -1,0 +1,17 @@
+[package]
+name = "host-check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Cinnabar's own HUD and panel admission, built to wasm for scripts/check-host.py"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The same Cinnabar revision as `mod-api` in the workspace Cargo.toml.
+ui = { git = "https://github.com/cinnabar-mc/cinnabar", rev = "8064f58fba3f2f504a0d5be82dfc32906d7ce49b" }
+serde_json = "1"
+
+# Not a workspace member: it is built for wasm only, by the script.
+[workspace]
