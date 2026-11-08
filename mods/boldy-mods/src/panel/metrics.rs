@@ -107,7 +107,7 @@ pub(super) const JUMP_NOTE_Y: f32 = JUMP_WINDOW_Y + ROW_PITCH + 6.0;
 pub(super) const JUMP_NOTE: [&str; 3] = [
     "Jump the moment you get hit.",
     "Shows early or late by the crosshair",
-    "and whether you took knockback.",
+    "and knockback left (Reset! is beta).",
 ];
 
 /// The Crosshair page's rows, below its colour button: the shape section, then the options.
