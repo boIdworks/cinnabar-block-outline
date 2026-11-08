@@ -14,6 +14,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p boldy-mods -p hive-autocs --target wasm32-unknown-unknown --release -- -D warnings
 cargo test --workspace --locked
 python scripts\check-host.py      # needs: pip install wasmtime
+python scripts\jump-reset-report.py --self-test
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of these on every push and pull request. The wasm clippy

@@ -81,6 +81,15 @@ The mod keeps the data needed to tune the threshold in the settings file
 The settings file holds 16 KiB, so if everything does not fit the oldest rows are left out, the
 ordinary hits' recordings before the resets.
 
-To improve the threshold, play some fights, then compare `carried` for hits where you pressed jump
-close to the hit against hits where you did not. A threshold that separates the two groups cleanly
-is the right one; `jump_reset_carry` changes it without a rebuild.
+### Let the tool do the comparison
+
+```powershell
+python scripts\jump-reset-report.py
+```
+
+It reads the installed settings file, keeps the hits you took on the ground, separates those with a
+jump inside the verdict's window from the rest, and recommends a `jump_reset_carry` only when the
+knock left after your jumps falls into two clearly separate groups (resets, and jumps that missed).
+With too little data (it wants at least 10 hits on the ground and 4 with a jump close to the hit) or
+no clean split, it says so instead of inventing a number. Set the value it suggests in the settings
+file; it takes effect without a rebuild.

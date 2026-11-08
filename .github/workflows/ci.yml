@@ -27,6 +27,8 @@ jobs:
         run: cargo clippy -p boldy-mods -p hive-autocs --target wasm32-unknown-unknown --release --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: Jump reset report tool
+        run: python3 scripts/jump-reset-report.py --self-test
 
   build:
     name: Build the components
