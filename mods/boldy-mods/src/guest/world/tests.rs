@@ -165,7 +165,7 @@ fn each_block_reads_its_own_cell_in_x_then_z_then_y_order() {
         for y in 0..size_y {
             for z in 0..size_z {
                 let entry = (x * 100 + y * 10 + z) as u32;
-                let want = if entry % 2 == 0 {
+                let want = if entry.is_multiple_of(2) {
                     vec![UNIT]
                 } else {
                     shape_boxes(&region.blocks, 1)
@@ -180,7 +180,7 @@ fn each_block_reads_its_own_cell_in_x_then_z_then_y_order() {
 #[test]
 fn a_cell_the_host_has_not_loaded_is_unknown() {
     let mut all = blocks(vec![0; 70], vec![entry(Selection::Fixed(Some(0)), false)]);
-    all.loaded = vec![u64::MAX, u64::MAX & !(1 << 3)]; // cell 67 is not loaded
+    all.loaded = vec![u64::MAX, !(1u64 << 3)]; // cell 67 is not loaded
     let region = sample([0, 0, 0], [70, 1, 1], all);
     assert!(boxes(cell_at(&region, [66, 0, 0])).is_some());
     assert!(

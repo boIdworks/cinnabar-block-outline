@@ -72,8 +72,10 @@ fn the_report_gives_average_most_and_calls_per_section() {
 #[test]
 fn the_frame_cap_is_what_the_budget_comments_say() {
     assert_eq!(FRAME_CAP, 200_000);
-    assert!(
-        FUEL_WARN < FRAME_CAP,
-        "a warning has to come before the cap"
-    );
+    const {
+        assert!(
+            FUEL_WARN < FRAME_CAP,
+            "a warning has to come before the cap"
+        )
+    };
 }
