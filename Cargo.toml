@@ -1,6 +1,6 @@
 [workspace]
-members = ["mods/block-outline", "mods/block-outline/pack", "mods/hive-autocs", "mods/hive-autocs/pack"]
-default-members = ["mods/block-outline"]
+members = ["mods/boldy-mods", "mods/boldy-mods/pack", "mods/hive-autocs", "mods/hive-autocs/pack"]
+default-members = ["mods/boldy-mods"]
 resolver = "3"
 
 [workspace.package]

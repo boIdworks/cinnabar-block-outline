@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build Boldy Mods (block-outline.wasm) as an importable Cinnabar WebAssembly component and install it."""
+"""Build Boldy Mods as an importable Cinnabar WebAssembly component and install it.
+
+The crate is `boldy-mods`, but the component keeps the file name `block-outline.wasm` it has always
+been installed under: Cinnabar keys a mod's settings file and permission grants by that name, so
+renaming it would reset every existing install. The name shown in the game is "Boldy Mods"."""
 
 from pathlib import Path
 import os
@@ -8,6 +12,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+# The installed file name (see the module docs); not the crate name.
+INSTALL_NAME = "block-outline.wasm"
 
 
 def main() -> None:
@@ -22,7 +28,7 @@ def main() -> None:
             "--locked",
             "--release",
             "-p",
-            "block-outline",
+            "boldy-mods",
             "--target",
             "wasm32-unknown-unknown",
         ],
@@ -30,8 +36,8 @@ def main() -> None:
         env=environment,
         check=True,
     )
-    core = target / "wasm32-unknown-unknown/release/block_outline.wasm"
-    output = ROOT / "dist/block-outline.wasm"
+    core = target / "wasm32-unknown-unknown/release/boldy_mods.wasm"
+    output = ROOT / "dist" / INSTALL_NAME
     subprocess.run(
         [
             *cargo,
@@ -39,7 +45,7 @@ def main() -> None:
             "--locked",
             "--release",
             "-p",
-            "block-outline-pack",
+            "boldy-mods-pack",
             "--",
             str(core),
             str(output),

@@ -5,7 +5,7 @@ use wasm_encoder::{ComponentNameSection, ComponentSection, CustomSection};
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
-        return Err("usage: block-outline-pack CORE.wasm COMPONENT.wasm".into());
+        return Err("usage: boldy-mods-pack CORE.wasm COMPONENT.wasm".into());
     }
 
     let core = std::fs::read(&args[0])?;
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     append_section(
         &mut component,
         "cinnabar:extension/panel-bundle@1",
-        block_outline::panel::bundle().as_bytes(),
+        boldy_mods::panel::bundle().as_bytes(),
     );
     append_section(
         &mut component,

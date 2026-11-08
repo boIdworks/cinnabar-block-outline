@@ -1,5 +1,5 @@
 [package]
-name = "block-outline-pack"
+name = "boldy-mods-pack"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ description = "Packs Boldy Mods into an installable Cinnabar component"
 publish = false
 
 [dependencies]
-block-outline = { path = ".." }
+boldy-mods = { path = ".." }
 wit-component = "=0.247.0"
 wasmparser = "=0.247.0"
 wasm-encoder = "=0.247.0"

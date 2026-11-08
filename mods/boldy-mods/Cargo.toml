@@ -1,5 +1,5 @@
 [package]
-name = "block-outline"
+name = "boldy-mods"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
