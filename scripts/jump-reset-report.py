@@ -14,6 +14,10 @@ those without, and recommends a threshold only if the knock-left values of the j
 into two clearly separate groups. With too little data, or no clean split, it says so instead of
 inventing a number.
 
+The mod only remembers its last 16 hits, so the script also keeps every hit it has seen in
+`block-outline.jump-history.txt` beside the settings file and reports on all of them; pass
+`--no-history` to look at the settings file alone.
+
     python scripts/jump-reset-report.py --self-test
 """
 
@@ -50,6 +54,12 @@ def parse_log(text):
             continue
         rows.append((offset, carried, {"1": True, "0": False}.get(grounded), speed))
     return rows
+
+
+def format_row(row):
+    offset, carried, grounded, speed = row
+    ground = "x" if grounded is None else str(int(grounded))
+    return f"{'x' if offset is None else offset},{round(carried * 1000)},{ground},{round(speed * 1000)}"
 
 
 def analyse(rows, window_ms, threshold):
@@ -103,13 +113,38 @@ def settings_path(argv):
     return Path(mods) / "block-outline.settings.json"
 
 
-def report(path):
+def merge_history(history, log):
+    """`history` plus whatever of `log` is new. The mod keeps only its last 16 hits, so each run
+    finds the longest stretch where the end of `history` equals the start of `log` and appends
+    the rest; that way hits pile up across play sessions instead of scrolling out."""
+    for size in range(min(len(history), len(log)), 0, -1):
+        if history[-size:] == log[:size]:
+            return history + log[size:]
+    return history + log
+
+
+def history_path(path):
+    return path.with_name(path.stem.removesuffix(".settings") + ".jump-history.txt")
+
+
+def report(path, use_history=True):
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         print(f"Could not read {path}: {error}", file=sys.stderr)
         return 2
     rows = parse_log(settings.get("jump_reset_log", ""))
+    if use_history:
+        saved = history_path(path)
+        try:
+            old = parse_log(saved.read_text(encoding="utf-8-sig"))
+        except OSError:
+            old = []
+        rows = merge_history(old, rows)
+        try:
+            saved.write_text(";".join(format_row(r) for r in rows), encoding="utf-8")
+        except OSError as error:
+            print(f"Could not save {saved}: {error}", file=sys.stderr)
     if not rows:
         print("The settings file has no recorded hits yet. Take some hits with Jump reset on.")
         return 1
@@ -155,6 +190,17 @@ def self_test():
     # Every jump the same: no split to find.
     same = [(0, 0.1, True, 0.3) for _ in range(12)]
     assert "No clean split" in analyse(same, 75, 0.08)["note"]
+    # Hits pile up across sessions: the overlap is not counted twice.
+    a, b, c, d, e = (parse_log(f"{i},{i + 100},1,{i}")[0] for i in range(5))
+    assert merge_history([a, b, c], [b, c, d]) == [a, b, c, d]
+    assert merge_history([a, b], [c, d]) == [a, b, c, d]
+    assert merge_history([a, b], [a, b]) == [a, b]
+    assert merge_history([], [e]) == [e]
+    assert [format_row(r) for r in parse_log("x,150,1,150;-57,45,0,98;3,7,x,0")] == [
+        "x,150,1,150",
+        "-57,45,0,98",
+        "3,7,x,0",
+    ]
     print("jump-reset-report self-test passed")
     return 0
 
@@ -163,7 +209,9 @@ def main():
     args = sys.argv[1:]
     if args == ["--self-test"]:
         return self_test()
-    return report(settings_path(args))
+    keep = "--no-history" not in args
+    args = [a for a in args if a != "--no-history"]
+    return report(settings_path(args), keep)
 
 
 if __name__ == "__main__":

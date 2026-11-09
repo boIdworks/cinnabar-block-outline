@@ -98,3 +98,8 @@ knock left after your jumps falls into two clearly separate groups (resets, and 
 With too little data (it wants at least 10 hits on the ground and 4 with a jump close to the hit) or
 no clean split, it says so instead of inventing a number. Set the value it suggests in the settings
 file; it takes effect without a rebuild.
+
+The mod only remembers its last 16 hits, so each run of the tool also saves what it has seen in
+`block-outline.jump-history.txt` next to the settings file and reports on all of it. Run it after
+each play session and the hits add up instead of scrolling out. `--no-history` looks at the
+settings file alone.
