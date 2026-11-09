@@ -9,6 +9,11 @@ successful reset leaves almost none).
 > knock-left threshold that decides `Reset!` (0.08 blocks per tick) was set from **one** recorded
 > jump reset, not from a data set. Treat the verdict as a good guide rather than a measurement,
 > and see [Help calibrate it](#help-calibrate-it) if you want to improve it.
+>
+> What the recorded data does say: 11 hits taken on the ground with no jump all left between
+> 0.149 and 0.342 blocks per tick, so the threshold is well clear of ordinary hits and a plain
+> hit will not be called a reset. What is still missing is the other side: several real resets to
+> show how low the knock-left really goes (the only one on record is 0.04).
 
 Needs the **Controls** (your jump key), **Player status** (hurt events and your velocity) and
 **HUD** permissions.
