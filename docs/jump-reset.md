@@ -10,10 +10,12 @@ successful reset leaves almost none).
 > jump reset, not from a data set. Treat the verdict as a good guide rather than a measurement,
 > and see [Help calibrate it](#help-calibrate-it) if you want to improve it.
 >
-> What the recorded data does say: 11 hits taken on the ground with no jump all left between
-> 0.149 and 0.342 blocks per tick, so the threshold is well clear of ordinary hits and a plain
-> hit will not be called a reset. What is still missing is the other side: several real resets to
-> show how low the knock-left really goes (the only one on record is 0.04).
+> What the recorded data does say: of 39 hits taken on the ground with no jump, 37 left 0.136 or
+> more blocks per tick (most near 0.15). Two left less (0.07 and 0.116) with no jump at all,
+> probably a wall or a corner, which is why the verdict also needs a jump
+> close to the hit and never goes by the knock-left alone. What is still missing is the other
+> side: several real resets to show how low the knock-left really goes. Two recorded hits with a
+> jump on the ground left 0.045, and the example the threshold was first set from left 0.04.
 
 Needs the **Controls** (your jump key), **Player status** (hurt events and your velocity) and
 **HUD** permissions.
