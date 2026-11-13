@@ -80,14 +80,17 @@ impl Mode {
         })
     }
 
-    /// Whether dying in this game is final: Skywars (`SKY`, `SW`) and Survival Games (`SG`), with
-    /// any size. Bedwars and other games that respawn are not, and an unknown game is not.
+    /// Whether being out in this game is final: Skywars (`SKY`, `SW`), Survival Games (`SG`) and
+    /// Block Party (`PARTY`, `BP`) and Block Drop (`DROP`), with any size. Bedwars and other games that respawn are not,
+    /// and an unknown game is not.
     pub fn no_respawns(&self) -> bool {
         let name = self.as_str();
-        ["SKY", "SW", "SG"].iter().any(|game| {
-            name.strip_prefix(game)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
-        })
+        ["SKY", "SW", "SG", "PARTY", "BP", "DROP"]
+            .iter()
+            .any(|game| {
+                name.strip_prefix(game)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
+            })
     }
 
     pub fn as_str(&self) -> &str {
@@ -101,11 +104,22 @@ impl Mode {
 pub enum Line {
     /// "Finding you a game of BED-DUOS...": the queue the player is in now.
     Queueing(Mode),
+    /// "Finding you a game of The Bridge...": a queue named for people, not by an ID `/q` takes.
+    QueueingUnknown,
+    /// "Finding you a game of The Bridge...": a game named for people that is in [`named`].
+    QueueingNamed(Named),
+    /// "Boldworks joined. [1/2]": this player joined a lobby of this many players. After a queue
+    /// starts, the first of these is the local player's own.
+    Joined(Name, u32),
+    /// "Boldworks did an oopsie!" (SkyWars, the void), "Boldworks made their last dance move" or
+    /// "Boldworks fell off" (Block Party), "Boldworks fell off the map!" (Block Drop): this player is out by their own doing. Hive prints no
+    /// kill line for it, so this is the only chat sign of it.
+    SelfOut(Name),
     /// "Game OVER!".
     GameOver,
     /// "All members of your party are now spectating.": the whole party is out.
     PartyOut,
-    /// "You were eliminated": the player is out for good.
+    /// "You were eliminated", or "You finished in 5th place!": the player is out for good.
     YouEliminated,
     /// "You were killed by X. They had 9 hearts": the player died (for good only where there are
     /// no respawns).
@@ -147,7 +161,16 @@ pub fn read_line(text: &str) -> Option<Line> {
     if lower.contains("you have to be in a party") {
         return Some(Line::NotInParty);
     }
-    if bare.starts_with("you were eliminated") {
+    // Hive's real wording is "You have been eliminated from the game! [No bed]" (seen in the
+    // autocs recording); "You were eliminated" is kept in case another game says it.
+    if bare.starts_with("you have been eliminated") || bare.starts_with("you were eliminated") {
+        return Some(Line::YouEliminated);
+    }
+    // A race is over for the player at "You finished in 5th place! [01:41.782]" (Deathrun) or
+    // "You finished all maps and came in 5th place! [01:08.4]" (Gravity), a minute or more before
+    // the game is over for everyone: the same as being out. A map done on the way ("You finished
+    // Dimensions! [00:10.565]") is not it.
+    if bare.starts_with("you finished in ") || bare.starts_with("you finished all maps") {
         return Some(Line::YouEliminated);
     }
     if bare.starts_with("you were killed by") {
@@ -156,19 +179,154 @@ pub fn read_line(text: &str) -> Option<Line> {
     if lower.contains("final kill") {
         return Some(Line::FinalKill);
     }
+    if let Some((who, max)) = joined(bare) {
+        return Some(Line::Joined(who, max));
+    }
+    if let Some(who) = SELF_OUT
+        .iter()
+        .find_map(|verb| bare.find(verb))
+        .and_then(|at| Name::new(&bare[..at]))
+    {
+        return Some(Line::SelfOut(who));
+    }
     let at = lower.find(FINDING)? + FINDING.len();
+    // Up to the "..." Hive ends the line with. A queue ID (`BED-DUOS`) is one word; a game
+    // queued from the menu is named for people instead ("The Bridge"), which is not something
+    // `/q` takes and does not say solos or duos either.
+    let name = lower[at..].split('.').next().unwrap_or("").trim();
+    if name.is_empty() {
+        return None;
+    }
+    if let Some(game) = named(name) {
+        return Some(Line::QueueingNamed(game));
+    }
     // The name is read from the lowercased copy; `Mode` makes it capitals again.
-    let name: String = lower[at..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .collect();
-    Mode::new(&name).map(Line::Queueing)
+    Some(Mode::new(name).map_or(Line::QueueingUnknown, Line::Queueing))
+}
+
+/// A game Hive names for people ("The Bridge") instead of by its queue code, and how to find the
+/// code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Named {
+    /// The game has one code.
+    Code(&'static str),
+    /// The code depends on the lobby size, read from the `[1/2]` of the next join line: pairs of
+    /// (players in the lobby, code).
+    BySize(&'static [(u32, &'static str)]),
+}
+
+/// The game a lowercase menu name stands for, from Hive's command list
+/// (support.playhive.com/commands). Only Hive's own wording of the name is matched, and a name
+/// that is not here is "unknown": the mod queues nothing until a `/q` by hand names the mode.
+/// Bedwars, Skywars and the other games Hive names by code need no entry. The Hive menu wording is
+/// confirmed for The Bridge only; the other names are Hive's game names.
+fn named(name: &str) -> Option<Named> {
+    Some(match name {
+        "the bridge" => Named::BySize(&[(2, "BRIDGE"), (4, "BRIDGE-DUOS")]),
+        // Recorded in the game: the menu's solo SkyWars and Build Battle both have 12 players. The
+        // bigger lobbies (duos, squads, mega) are not recorded, so they are left out: with no
+        // mode known nothing is queued, which beats queueing the wrong one.
+        "skywars" => Named::BySize(&[(12, "SKY")]),
+        "build battle" => Named::BySize(&[(12, "BUILD")]),
+        // Recorded: the menu's Survival Games lobbies have 24 players.
+        "survival games" => Named::BySize(&[(24, "SG")]),
+        "block drop" => Named::Code("DROP"),
+        "block party" => Named::Code("PARTY"),
+        "capture the flag" => Named::Code("CTF"),
+        "deathrun" => Named::Code("DR"),
+        "ghost invasion" => Named::Code("GI"),
+        "gravity" => Named::Code("GRAV"),
+        "ground wars" => Named::Code("GROUND"),
+        "hide and seek" => Named::Code("HIDE"),
+        "mobgame" => Named::Code("MOB"),
+        "murder mystery" => Named::Code("MURDER"),
+        _ => return None,
+    })
+}
+
+/// What Hive says after a player's name when they are out by their own doing. Other players' lines
+/// end with `[+2XP]`; the local player's does not, which does not matter here.
+const SELF_OUT: [&str; 3] = [" did an oopsie", " made their last dance move", " fell off"];
+
+/// Who joined, and the lobby size, in Hive's "Name joined. [1/2]" line: the number after the slash.
+fn joined(bare: &str) -> Option<(Name, u32)> {
+    let at = bare.find(" joined.")?;
+    let rest = &bare[at + " joined.".len()..];
+    let count = &rest[rest.find('[')? + 1..];
+    let (_, max) = count[..count.find(']')?].split_once('/')?;
+    Some((Name::new(&bare[..at])?, max.trim().parse().ok()?))
+}
+
+/// The longest player name kept (Hive names are shorter).
+const LONGEST_NAME: usize = 24;
+
+/// A player's name, lowercased: letters, digits, spaces, `_` and `-`. A line with a rank, a symbol
+/// or a chat message in front of a name never makes one, so what a player types cannot pass for
+/// Hive's own lines. Small and `Copy`, like [`Mode`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Name {
+    bytes: [u8; LONGEST_NAME],
+    len: u8,
+}
+
+impl Name {
+    /// The name `text` (already lowercase) is, if it is one.
+    pub fn new(text: &str) -> Option<Self> {
+        let text = text.as_bytes();
+        if text.is_empty()
+            || text.len() > LONGEST_NAME
+            || !text
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'_' | b'-'))
+            || text.first() == Some(&b' ')
+            || text.last() == Some(&b' ')
+        {
+            return None;
+        }
+        let mut bytes = [0; LONGEST_NAME];
+        for (slot, byte) in bytes.iter_mut().zip(text) {
+            *slot = byte.to_ascii_lowercase();
+        }
+        Some(Self {
+            bytes,
+            len: text.len() as u8,
+        })
+    }
 }
 
 /// The command that queues `mode`. (Hive has no `/rq`: it answers "Unknown command", so a game
 /// whose mode is not known is not queued at all.)
 pub fn command(mode: Mode) -> String {
     format!("/q {}", mode.as_str())
+}
+
+/// Whether a sidebar row label is Hive's "Custom" tag (colour codes ignored).
+fn custom_label(label: &str) -> bool {
+    let mut plain = [0u8; 8];
+    let mut len = 0;
+    let mut chars = label.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{a7}' {
+            chars.next();
+            continue;
+        }
+        if !c.is_ascii() || len == plain.len() {
+            return false;
+        }
+        plain[len] = c as u8;
+        len += 1;
+    }
+    plain[..len].trim_ascii().eq_ignore_ascii_case(b"custom")
+}
+
+/// Whether the sidebar says the game is a Hive custom game: a "Custom" row in it. `None` when the
+/// sidebar is the game summary after a game, which says nothing about the kind of game (what was
+/// known stays).
+pub fn custom_game<'a>(title: &str, mut labels: impl Iterator<Item = &'a str>) -> Option<bool> {
+    if title.to_ascii_lowercase().contains("game summary") {
+        return None;
+    }
+    Some(labels.any(custom_label))
 }
 
 /// What the auto queue knows and is waiting to do. Small and `Copy`, so a frame reads it cheaply.
@@ -189,6 +347,15 @@ pub struct Queue {
     kill_at: Option<f32>,
     /// Whether the player was alive at the last reading (none: not known).
     was_alive: Option<bool>,
+    /// The local player's name: the one in the first join line after a queue starts.
+    me: Option<Name>,
+    /// Whether the next join line is the local player's own.
+    learn_me: bool,
+    /// A game whose code depends on the lobby size was just queued, and the size has not been seen
+    /// yet: (players, code) pairs.
+    sizes: Option<&'static [(u32, &'static str)]>,
+    /// The game is a Hive custom game (the sidebar says "Custom"): nothing is queued for it.
+    custom: bool,
 }
 
 impl Queue {
@@ -203,6 +370,28 @@ impl Queue {
             died_at: None,
             kill_at: None,
             was_alive: None,
+            me: None,
+            learn_me: false,
+            sizes: None,
+            custom: false,
+        }
+    }
+
+    /// Whether the current game is a custom game, which the auto queue leaves alone.
+    pub fn is_custom(&self) -> bool {
+        self.custom
+    }
+
+    /// The sidebar says whether the game is a custom one (see [`custom_game`]). A custom game
+    /// drops anything already scheduled.
+    pub fn set_custom(&mut self, custom: bool) {
+        self.custom = custom;
+        if custom {
+            self.due = None;
+            self.ask = None;
+            self.answer_until = None;
+            self.died_at = None;
+            self.kill_at = None;
         }
     }
 
@@ -210,13 +399,67 @@ impl Queue {
     pub fn queueing(&mut self, mode: Mode) -> bool {
         let changed = self.mode != Some(mode);
         self.mode = Some(mode);
+        self.sizes = None;
+        self.learn_me = true;
         changed
+    }
+
+    /// Hive said the player is queueing for a game whose queue ID is not known, so the last mode
+    /// is no longer the current one: queueing it would put the player in the wrong game. True when
+    /// a mode was forgotten.
+    pub fn queueing_unknown(&mut self) -> bool {
+        self.sizes = None;
+        self.learn_me = true;
+        self.mode.take().is_some()
+    }
+
+    /// Hive said the player is queueing for a game it names for people ([`named`]). The old mode
+    /// is forgotten. A game with one code is that mode at once (returned); one whose code depends
+    /// on the lobby size waits for it ([`Queue::joined`]).
+    pub fn queueing_named(&mut self, game: Named) -> Option<Mode> {
+        self.queueing_unknown();
+        match game {
+            Named::Code(code) => {
+                let mode = Mode::new(code)?;
+                self.mode = Some(mode);
+                Some(mode)
+            }
+            Named::BySize(sizes) => {
+                self.sizes = Some(sizes);
+                None
+            }
+        }
+    }
+
+    /// `who` joined a lobby of `max` players. After a queue starts the first to join is the local
+    /// player, whose name is kept. Right after a game whose code depends on the lobby
+    /// size was queued, that size picks the code (The Bridge: 2 is `BRIDGE`, 4 is `BRIDGE-DUOS`);
+    /// any other size ends the wait with no mode. The mode is returned when it was just learned.
+    pub fn joined(&mut self, who: Name, max: u32) -> Option<Mode> {
+        if self.learn_me {
+            self.me = Some(who);
+            self.learn_me = false;
+        }
+        let sizes = self.sizes.take()?;
+        let (_, code) = sizes.iter().find(|(players, _)| *players == max)?;
+        let mode = Mode::new(code)?;
+        self.mode = Some(mode);
+        Some(mode)
+    }
+
+    /// `who` is out by their own doing at `now` ("did an oopsie!", "made their last dance move"). In a game with no respawns (and
+    /// a known one) that is the end of the local player's game, when `who` is them: find out
+    /// whether a party is waiting. True when the party question was started.
+    pub fn self_out(&mut self, who: Name, now: f32) -> bool {
+        self.me == Some(who)
+            && self.mode.is_some_and(|mode| mode.no_respawns())
+            && self.eliminated(now)
     }
 
     /// The player's game is finished at `now` (Game OVER, the party out, or eliminated with no
     /// party): queue the next one soon, unless one was just queued. True when it was scheduled.
     pub fn finished(&mut self, now: f32) -> bool {
-        if self.mode.is_none() || self.due.is_some() || now < self.quiet_until {
+        if self.custom || self.mode.is_none() || self.due.is_some() || now < self.quiet_until {
             return false;
         }
         self.ask = None;
@@ -228,7 +471,8 @@ impl Queue {
     /// The player is out for good at `now` (Hive said so): find out whether a party is waiting.
     /// True when the question was started.
     pub fn eliminated(&mut self, now: f32) -> bool {
-        if self.mode.is_none()
+        if self.custom
+            || self.mode.is_none()
             || self.due.is_some()
             || self.ask.is_some()
             || self.answer_until.is_some_and(|until| now < until)
@@ -334,6 +578,7 @@ impl Queue {
     /// "Finding you a game" line). A queue the player starts by hand names its own mode.
     pub fn sent(&mut self, now: f32) {
         self.due = None;
+        self.learn_me = true;
         self.quiet_until = now + QUIET;
     }
 

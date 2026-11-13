@@ -27,10 +27,10 @@ most of the code is testable and the part that is not is thin glue.
 | `hudedit.rs` | the on-screen editor that moves and resizes those three | yes |
 | `jumpreset.rs` | jump timing, knock-left measurement, the recorded log | yes |
 | `zoom.rs` | smooth zoom, scroll steps | yes |
-| `autoq.rs` | auto queue: reading Hive's "Finding you a game of ...", "Game OVER!", party-out and "FINAL KILL!" chat lines (`read_line`), telling the player's own elimination (Hive's "You were eliminated", or `alive` turning off plus a final kill), the `/p list` party check, and the timing of the `/q` command (`Queue`) | yes |
+| `autoq.rs` | auto queue: reading Hive's "Finding you a game of ...", "Game OVER!", party-out and "FINAL KILL!" chat lines (`read_line`), telling the player's own elimination (Hive's "You have been eliminated from the game!", or `alive` turning off plus a final kill), the `/p list` party check, and Hive's "Custom" sidebar row (`custom_game`), so a custom game is never queued, and the timing of the `/q` command (`Queue`) | yes |
 | `panel/` | the F8 menu: `ids` and `metrics` (control ids and layout constants), `layout/` (widgets, pages, sections), `controls/` (the control table, `nav` for keyboard focus), `events` (what clicks and typing change), `bindings` (live captions and colours), `content` (the full document and its patches), `help` (hover help) | yes |
 | `arena.rs` | bump allocator for big host replies (see below) | yes |
-| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements), `queue` (the auto queue's chat reads, the life read, the party question and the command) | only the helpers that do not call the host (terrain lookup, targeting, crosshair send order, fuel report); the host calls themselves run only in the game |
+| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements), `queue` (the auto queue's chat reads, the life read, the sidebar read once a second, the party question and the command) | only the helpers that do not call the host (terrain lookup, targeting, crosshair send order, fuel report); the host calls themselves run only in the game |
 | `host_dump.rs` | writes every document the mod can send, for `scripts/check-host.py` | test-only |
 
 ### `mods/hive-autocs/src`

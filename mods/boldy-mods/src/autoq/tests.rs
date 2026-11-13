@@ -4,6 +4,10 @@ fn mode(name: &str) -> Mode {
     Mode::new(name).expect("a valid mode")
 }
 
+fn who(name: &str) -> Name {
+    Name::new(name).expect("a valid name")
+}
+
 #[test]
 fn hives_queue_line_names_the_mode() {
     assert_eq!(
@@ -23,6 +27,205 @@ fn hives_queue_line_names_the_mode() {
         read_line("finding you a game of bed-mega..."),
         Some(Line::Queueing(mode("BED-MEGA")))
     );
+}
+
+#[test]
+fn a_game_named_for_people_is_not_a_queue_id() {
+    // Recorded from Hive when The Bridge is queued from the menu: it must not become `/q THE`.
+    assert_eq!(
+        read_line("§b§l» §r§7§7Finding you a game of The Bridge..."),
+        Some(Line::QueueingNamed(Named::BySize(&[
+            (2, "BRIDGE"),
+            (4, "BRIDGE-DUOS")
+        ])))
+    );
+    // Recorded from Hive's menus: SkyWars is one word but still not a code (`/q SKYWARS` is not
+    // one), and Build Battle is two.
+    assert_eq!(
+        read_line("§b§l» §r§7§7Finding you a game of SkyWars..."),
+        Some(Line::QueueingNamed(Named::BySize(&[(12, "SKY")])))
+    );
+    assert_eq!(
+        read_line("§b§l» §r§7§7Finding you a game of Build Battle..."),
+        Some(Line::QueueingNamed(Named::BySize(&[(12, "BUILD")])))
+    );
+    assert_eq!(
+        read_line("§b§l» §r§7§7Finding you a game of Survival Games..."),
+        Some(Line::QueueingNamed(Named::BySize(&[(24, "SG")])))
+    );
+    assert_eq!(
+        read_line("Finding you a game of Capture The Flag..."),
+        Some(Line::QueueingNamed(Named::Code("CTF")))
+    );
+    assert_eq!(
+        read_line("Finding you a game of Ground Wars..."),
+        Some(Line::QueueingNamed(Named::Code("GROUND")))
+    );
+    assert_eq!(
+        read_line("Finding you a game of Murder Mystery..."),
+        Some(Line::QueueingNamed(Named::Code("MURDER")))
+    );
+    assert_eq!(
+        read_line("Finding you a game of Some New Game..."),
+        Some(Line::QueueingUnknown)
+    );
+}
+
+#[test]
+fn the_lobby_size_is_read_from_the_joined_line() {
+    // Recorded from Hive.
+    assert_eq!(
+        read_line("§a§l» §r§7Boldworks joined. §8[1/2]"),
+        Some(Line::Joined(who("boldworks"), 2))
+    );
+    assert_eq!(
+        read_line("§a§l» §r§7Chomik4696 joined. §8[8/8]"),
+        Some(Line::Joined(who("chomik4696"), 8))
+    );
+    assert_eq!(read_line("Boldworks joined."), None);
+}
+
+#[test]
+fn the_bridge_lobby_size_tells_solos_from_duos() {
+    let bridge = Named::BySize(&[(2, "BRIDGE"), (4, "BRIDGE-DUOS")]);
+    let me = who("boldworks");
+    let mut queue = Queue::default();
+    queue.queueing(mode("BED-DUOS"));
+    // A lobby joined with no such game queued teaches nothing.
+    assert_eq!(queue.joined(me, 2), None);
+    assert_eq!(queue.mode, Some(mode("BED-DUOS")));
+
+    assert_eq!(
+        queue.queueing_named(bridge),
+        None,
+        "the size is not seen yet"
+    );
+    assert_eq!(queue.mode, None, "Bedwars is forgotten");
+    assert_eq!(queue.joined(me, 2), Some(mode("BRIDGE")));
+    assert_eq!(queue.joined(me, 4), None, "the size is read once");
+
+    queue.queueing_named(bridge);
+    assert_eq!(queue.joined(me, 4), Some(mode("BRIDGE-DUOS")));
+
+    // Any other size is not a Bridge lobby, and ends the wait.
+    queue.queueing_named(bridge);
+    assert_eq!(queue.joined(me, 8), None);
+    assert_eq!(queue.mode, None);
+    assert_eq!(queue.joined(me, 2), None);
+}
+
+#[test]
+fn a_game_with_one_code_is_that_mode_at_once() {
+    let mut queue = Queue::default();
+    queue.queueing(mode("BED-DUOS"));
+    assert_eq!(queue.queueing_named(Named::Code("CTF")), Some(mode("CTF")));
+    assert_eq!(command(queue.mode.unwrap()), "/q CTF");
+}
+
+#[test]
+fn every_code_in_hives_command_list_is_queued() {
+    // Hive's list (support.playhive.com/commands), aliases included.
+    let codes = [
+        "BED",
+        "BW",
+        "BED-DUOS",
+        "BW-DUOS",
+        "BED-SQUADS",
+        "BW-SQUADS",
+        "BED-MEGA",
+        "BW-MEGA",
+        "BED-DUELS",
+        "BW-DUELS",
+        "BED-DUELS-DUOS",
+        "BW-DUELS-DUOS",
+        "HUB-BED",
+        "DROP",
+        "PARTY",
+        "BP",
+        "BRIDGE",
+        "BRIDGE-DUOS",
+        "BUILD",
+        "BB",
+        "BUILD-DUOS",
+        "BB-DUOS",
+        "BUILDX",
+        "BUILD-DUOSX",
+        "BB-DUOSX",
+        "BUILD-SPEED",
+        "BB-SPEED",
+        "CTF",
+        "DR",
+        "GI",
+        "GRAV",
+        "GROUND",
+        "GW",
+        "HIDE",
+        "HNS",
+        "MOB",
+        "MURDER",
+        "MM",
+        "HUB-PARKOUR",
+        "REPLAY",
+        "SKY",
+        "SW",
+        "SKY-DUOS",
+        "SW-DUOS",
+        "SKY-SQUADS",
+        "SW-SQUADS",
+        "SKY-MEGA",
+        "SW-MEGA",
+        "SG",
+        "SG-DUOS",
+    ];
+    for code in codes {
+        // Said as the queue starts, so the mode is learned and sent back as `/q CODE`.
+        let line = format!("§b§l» §r§7§7Finding you a game of {code}...");
+        assert_eq!(read_line(&line), Some(Line::Queueing(mode(code))), "{code}");
+        assert_eq!(command(mode(code)), format!("/q {code}"));
+    }
+    // And the codes the menu names for people are real codes in that list.
+    for game in [
+        "block drop",
+        "block party",
+        "capture the flag",
+        "deathrun",
+        "ghost invasion",
+        "gravity",
+        "ground wars",
+        "hide and seek",
+        "mobgame",
+        "murder mystery",
+        "the bridge",
+        "skywars",
+        "build battle",
+        "survival games",
+    ] {
+        let Some(Line::QueueingNamed(found)) =
+            read_line(&format!("Finding you a game of {game}..."))
+        else {
+            panic!("{game} is not known");
+        };
+        let named_codes: Vec<&str> = match found {
+            Named::Code(code) => vec![code],
+            Named::BySize(sizes) => sizes.iter().map(|(_, code)| *code).collect(),
+        };
+        for code in named_codes {
+            assert!(codes.contains(&code), "{game}: {code}");
+        }
+    }
+}
+
+#[test]
+fn an_unknown_queue_forgets_the_last_mode() {
+    // Bedwars was queued, then The Bridge from the menu: its game over must not queue Bedwars.
+    let mut queue = Queue::default();
+    queue.queueing(mode("BED-DUOS"));
+    assert!(queue.queueing_unknown());
+    assert!(!queue.finished(0.0), "no mode, so nothing is queued");
+    assert!(!queue.queueing_unknown(), "nothing left to forget");
+    // Queueing by hand names the mode again.
+    queue.queueing(mode("BRIDGE-DUOS"));
+    assert!(queue.finished(1.0));
 }
 
 #[test]
@@ -54,6 +257,34 @@ fn the_party_and_final_kill_lines_are_read() {
     );
     assert_eq!(
         read_line("§c§l» §r§7§lYou were eliminated"),
+        Some(Line::YouEliminated)
+    );
+    // Recorded from Hive Deathrun: finishing the run ends the player's game before the game ends.
+    assert_eq!(
+        read_line("§a§l» §r§e You finished in §f5th §eplace! §7[01:41.782]"),
+        Some(Line::YouEliminated)
+    );
+    assert_eq!(
+        read_line("§a§l» §r§7Roselily2 has finished in 6th place! [01:42.384]"),
+        None,
+        "other players finishing is not the player"
+    );
+    // Recorded from Hive Gravity: all maps done is the end; one map done is not.
+    assert_eq!(
+        read_line("§a§l» §r§e You finished all maps and came in §f5th §eplace! §7[01:08.4]"),
+        Some(Line::YouEliminated)
+    );
+    assert_eq!(
+        read_line("§a§l» §r§e You finished §fDimensions§e! §7[00:10.565] [+00:01.28]"),
+        None
+    );
+    assert_eq!(
+        read_line("§a§l» §r§7EnviousPuma6122 finished all maps and came in 2nd place! [01:0"),
+        None
+    );
+    // Recorded from Hive Bedwars.
+    assert_eq!(
+        read_line("§c§l» §r§iYou have been §celiminated §ifrom the game! §8[No bed]"),
         Some(Line::YouEliminated)
     );
     assert_eq!(
@@ -301,11 +532,21 @@ fn nothing_starts_while_a_queue_is_waiting_or_just_sent() {
 
 #[test]
 fn only_games_with_no_respawns_are_final() {
-    for name in ["SKY", "SKY-DUOS", "SW", "SW-SQUADS", "SG", "SG-DUOS"] {
+    for name in [
+        "SKY",
+        "SKY-DUOS",
+        "SW",
+        "SW-SQUADS",
+        "SG",
+        "SG-DUOS",
+        "PARTY",
+        "BP",
+        "DROP",
+    ] {
         assert!(mode(name).no_respawns(), "{name}");
     }
     for name in [
-        "BED", "BED-DUOS", "BW", "SWITCH", "SGX", "DROP", "MURDER", "BUILD",
+        "BED", "BED-DUOS", "BW", "SWITCH", "SGX", "DROPX", "MURDER", "BUILD",
     ] {
         assert!(!mode(name).no_respawns(), "{name}");
     }
@@ -326,4 +567,220 @@ fn being_killed_ends_the_game_only_where_there_are_no_respawns() {
     let mut queue = Queue::default();
     assert!(!queue.killed(10.0));
     assert!(!queue.asking());
+}
+
+#[test]
+fn a_death_by_ones_own_doing_ends_a_no_respawn_game() {
+    // Recorded from Hive SkyWars (solos): falling into the void prints only these two lines, then
+    // the "You died!" title. There is no kill line, and the `alive` flag stays on while spectating.
+    assert_eq!(
+        read_line("§c§l» §r§7Boldworks §cdid an oopsie!"),
+        Some(Line::SelfOut(who("boldworks")))
+    );
+    // A chat message that imitates it is not a name.
+    assert_eq!(
+        read_line("§7qz x7q2§8 [§iU§8] §7§l» §rboldworks did an oopsie!"),
+        None
+    );
+
+    let mut queue = Queue::default();
+    queue.queueing(mode("SKY"));
+    // The first join line after the queue starts is the player's own.
+    queue.joined(who("boldworks"), 12);
+    queue.joined(who("someone else"), 12);
+    assert!(!queue.self_out(who("someone else"), 5.0), "not the player");
+    assert!(!queue.asking());
+    assert!(queue.self_out(who("boldworks"), 6.0));
+    assert!(
+        queue.asking(),
+        "the party question is asked, then the queue"
+    );
+}
+
+#[test]
+fn an_oopsie_only_ends_a_game_that_has_no_respawns() {
+    let mut queue = Queue::default();
+    queue.queueing(mode("BED-DUOS"));
+    queue.joined(who("boldworks"), 8);
+    assert!(!queue.self_out(who("boldworks"), 5.0), "Bedwars respawns");
+
+    // With the mode unknown nothing is queued either.
+    let mut queue = Queue::default();
+    queue.queueing(mode("SKY"));
+    queue.joined(who("boldworks"), 12);
+    queue.queueing_unknown();
+    assert!(!queue.self_out(who("boldworks"), 5.0));
+}
+
+#[test]
+fn the_players_name_is_learned_again_at_each_queue() {
+    let mut queue = Queue::default();
+    queue.queueing(mode("SKY"));
+    queue.joined(who("first name"), 12);
+    queue.joined(who("boldworks"), 12);
+    assert!(
+        !queue.self_out(who("boldworks"), 1.0),
+        "the second to join is not the player"
+    );
+    queue.queueing(mode("SKY"));
+    queue.joined(who("boldworks"), 12);
+    assert!(queue.self_out(who("boldworks"), 2.0));
+}
+
+#[test]
+fn survival_games_from_the_menu_is_queued_again_after_a_kill() {
+    // Recorded from Hive: Survival Games has 24 players; being killed ends the game for good.
+    let mut queue = Queue::default();
+    assert_eq!(
+        queue.queueing_named(Named::BySize(&[(24, "SG")])),
+        None,
+        "the size comes next"
+    );
+    assert_eq!(queue.joined(who("boldworks"), 24), Some(mode("SG")));
+    assert!(
+        queue.killed(50.0),
+        "no respawns: out, so the party is asked about"
+    );
+    assert!(queue.ask_ready(50.0));
+    queue.asked(50.0);
+    assert!(queue.not_in_party(50.5), "Hive says there is no party");
+    assert!(queue.ready(51.6));
+    assert_eq!(command(queue.mode.unwrap()), "/q SG");
+}
+
+#[test]
+fn finishing_a_deathrun_queues_deathrun_again() {
+    // "Finding you a game of DeathRun..." is the menu's name for it; finishing is the player
+    // being out, so the party is asked about and, with none, `/q DR` follows.
+    let Some(Line::QueueingNamed(game)) =
+        read_line("§b§l» §r§7§7Finding you a game of DeathRun...")
+    else {
+        panic!("DeathRun is not known");
+    };
+    let mut queue = Queue::default();
+    assert_eq!(queue.queueing_named(game), Some(mode("DR")));
+    assert!(
+        queue.eliminated(100.0),
+        "finished: the party is asked about"
+    );
+    assert!(queue.ask_ready(100.0));
+    queue.asked(100.0);
+    assert!(queue.not_in_party(100.5));
+    assert!(queue.ready(101.6));
+    assert_eq!(command(queue.mode.unwrap()), "/q DR");
+}
+
+#[test]
+fn block_party_out_lines_end_the_players_game() {
+    // Recorded from Hive Block Party: the player's own line has no [+2XP]; the others' have.
+    assert_eq!(
+        read_line("§c§l» §r§fBoldworks §cmade their last dance move"),
+        Some(Line::SelfOut(who("boldworks")))
+    );
+    assert_eq!(
+        read_line("§c§l» §r§fCardPoem4674 §cmade their last dance move §7[+2XP]"),
+        Some(Line::SelfOut(who("cardpoem4674")))
+    );
+    assert_eq!(
+        read_line("§c§l» §r§fWorkedTuna5207 §cfell off §7[+2XP]"),
+        Some(Line::SelfOut(who("workedtuna5207")))
+    );
+
+    let Some(Line::QueueingNamed(game)) =
+        read_line("§b§l» §r§7§7Finding you a game of Block Party...")
+    else {
+        panic!("Block Party is not known");
+    };
+    let mut queue = Queue::default();
+    assert_eq!(queue.queueing_named(game), Some(mode("PARTY")));
+    queue.joined(who("boldworks"), 14);
+    // Somebody else falling off is not the player.
+    assert!(!queue.self_out(who("cardpoem4674"), 20.0));
+    assert!(queue.self_out(who("boldworks"), 30.0));
+    assert!(queue.ask_ready(30.0));
+    queue.asked(30.0);
+    assert!(queue.not_in_party(30.5));
+    assert!(queue.ready(31.6));
+    assert_eq!(command(queue.mode.unwrap()), "/q PARTY");
+}
+
+#[test]
+fn block_drop_falling_off_the_map_ends_the_players_game() {
+    // Recorded from Hive Block Drop: the others' lines end with [5 XP], the player's does not.
+    assert_eq!(
+        read_line("§c§l» §r§fBoldworks §cfell off the map!"),
+        Some(Line::SelfOut(who("boldworks")))
+    );
+    assert_eq!(
+        read_line("§c§l» §r§fAx0catt972 §cfell off the map! §7[5 XP]"),
+        Some(Line::SelfOut(who("ax0catt972")))
+    );
+    let Some(Line::QueueingNamed(game)) =
+        read_line("§b§l» §r§7§7Finding you a game of Block Drop...")
+    else {
+        panic!("Block Drop is not known");
+    };
+    let mut queue = Queue::default();
+    assert_eq!(queue.queueing_named(game), Some(mode("DROP")));
+    queue.joined(who("boldworks"), 12);
+    assert!(!queue.self_out(who("ax0catt972"), 90.0), "somebody else");
+    assert!(queue.self_out(who("boldworks"), 100.0));
+    assert!(queue.ask_ready(100.0));
+    queue.asked(100.0);
+    assert!(queue.not_in_party(100.5));
+    assert!(queue.ready(101.6));
+    assert_eq!(command(queue.mode.unwrap()), "/q DROP");
+}
+
+#[test]
+fn a_custom_row_in_the_sidebar_marks_a_custom_game() {
+    // Recorded from Hive: the top right of a custom game says "Custom" in a sidebar row.
+    let title = "support.playhive.com/ui";
+    let custom = ["§7Custom", "§f24:56", "§aLevel §f§f50§7/100"];
+    assert_eq!(custom_game(title, custom.into_iter()), Some(true));
+    assert_eq!(custom_game(title, ["custom "].into_iter()), Some(true));
+    let normal = ["§7Now Playing", "§f24:56", "§aLevel §f§f50§7/100"];
+    assert_eq!(custom_game(title, normal.into_iter()), Some(false));
+    assert_eq!(custom_game(title, [].into_iter()), Some(false));
+    // Other words that only contain it are not it.
+    assert_eq!(custom_game(title, ["Customs"].into_iter()), Some(false));
+    assert_eq!(
+        custom_game(title, ["§7Custom game"].into_iter()),
+        Some(false)
+    );
+    // After the game the sidebar is the summary: it says nothing, so what was known stays.
+    assert_eq!(custom_game("Game Summary", normal.into_iter()), None);
+}
+
+#[test]
+fn a_custom_game_is_never_queued() {
+    let mut queue = Queue::default();
+    queue.queueing(mode("SKY"));
+    queue.set_custom(true);
+    assert!(queue.is_custom());
+    assert!(!queue.finished(100.0), "game over");
+    assert!(!queue.waiting());
+    assert!(!queue.eliminated(100.0), "eliminated");
+    assert!(!queue.asking());
+    assert!(!queue.ready(110.0));
+    // A normal game after it queues again.
+    queue.set_custom(false);
+    assert!(queue.finished(120.0));
+    assert!(queue.ready(121.5));
+}
+
+#[test]
+fn a_game_found_to_be_custom_drops_what_was_scheduled() {
+    let mut queue = Queue::default();
+    queue.queueing(mode("SKY"));
+    assert!(queue.eliminated(10.0));
+    queue.set_custom(true);
+    assert!(!queue.asking());
+    assert!(!queue.ask_ready(10.5));
+    assert!(!queue.finished(0.0));
+    queue.set_custom(false);
+    assert!(queue.finished(30.0));
+    queue.set_custom(true);
+    assert!(!queue.waiting());
+    assert!(!queue.ready(32.0));
 }

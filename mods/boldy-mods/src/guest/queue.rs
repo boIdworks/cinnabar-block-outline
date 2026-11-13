@@ -20,6 +20,9 @@ const READ_EVERY: f32 = 0.125;
 /// Fuel a frame must have left for the feature to read at all.
 const QUEUE_RESERVE: u64 = 25_000;
 
+/// Seconds between reads of the sidebar, which is where Hive marks a custom game.
+const SIDEBAR_EVERY: f32 = 1.0;
+
 thread_local! {
     /// The player-state reads made so far this frame, and the session the frame is in (0: none).
     static USED: StdCell<(u32, u64)> = const { StdCell::new((0, 0)) };
@@ -42,6 +45,8 @@ struct Reads {
     /// When the next read is due, and whether it is chat's turn (else the life state's).
     next: f32,
     chat_turn: bool,
+    /// When the sidebar is next read (it says whether the game is a custom one).
+    sidebar_next: f32,
 }
 
 impl Reads {
@@ -52,6 +57,7 @@ impl Reads {
             started: false,
             next: 0.0,
             chat_turn: true,
+            sidebar_next: 0.0,
         }
     }
 }
@@ -137,10 +143,32 @@ fn read_once(reads: &mut Reads, queue: &mut autoq::Queue, now: f32) {
     if reads.skipping || reads.chat_turn {
         read_chat(reads, queue, now);
     } else {
-        read_life(queue, now);
+        if now >= reads.sidebar_next {
+            reads.sidebar_next = now + SIDEBAR_EVERY;
+            read_sidebar(queue);
+        } else {
+            read_life(queue, now);
+        }
         reads.chat_turn = true;
         reads.next = now + READ_EVERY;
     }
+}
+
+/// Reads Hive's sidebar for the "Custom" row of a custom game, which is never auto queued. After
+/// the game the sidebar is the game summary, which leaves what was known as it was.
+fn read_sidebar(queue: &mut autoq::Queue) {
+    note_read();
+    let Ok(Some(sidebar)) = player_state::read_sidebar() else {
+        return;
+    };
+    let labels = sidebar.rows.iter().map(|row| row.label.as_str());
+    let Some(custom) = autoq::custom_game(&sidebar.title, labels) else {
+        return;
+    };
+    if custom && !queue.is_custom() {
+        show_label("Auto queue: custom game, off for this one");
+    }
+    queue.set_custom(custom);
 }
 
 /// Reads whether the player is alive, so dying (with a "FINAL KILL!" line) is known. While a queue
@@ -191,6 +219,29 @@ fn read_chat(reads: &mut Reads, queue: &mut autoq::Queue, now: f32) {
             }
             continue;
         }
+        match line {
+            Line::QueueingUnknown => {
+                queue.queueing_unknown();
+                continue;
+            }
+            Line::QueueingNamed(game) => {
+                if let Some(mode) = queue.queueing_named(game)
+                    && !skipping
+                {
+                    show_label(&format!("Auto queue: {}", mode.as_str()));
+                }
+                continue;
+            }
+            Line::Joined(who, max) => {
+                if let Some(mode) = queue.joined(who, max)
+                    && !skipping
+                {
+                    show_label(&format!("Auto queue: {}", mode.as_str()));
+                }
+                continue;
+            }
+            _ => {}
+        }
         if skipping {
             continue;
         }
@@ -201,6 +252,10 @@ fn read_chat(reads: &mut Reads, queue: &mut autoq::Queue, now: f32) {
                 queue.finished(now);
                 announce(was, queue, "game over");
                 unknown_mode(queue);
+                // A game over that queues nothing says why, so a quiet failure can be told apart.
+                if !was && !queue.waiting() && queue.mode.is_some() {
+                    show_label("Auto queue: game over seen, but a queue was just sent");
+                }
             }
             Line::PartyOut => {
                 queue.finished(now);
@@ -216,6 +271,10 @@ fn read_chat(reads: &mut Reads, queue: &mut autoq::Queue, now: f32) {
                 announce_question(was_asking, queue);
                 unknown_mode(queue);
             }
+            Line::SelfOut(who) => {
+                queue.self_out(who, now);
+                announce_question(was_asking, queue);
+            }
             Line::YouWereKilled => {
                 queue.killed(now);
                 announce_question(was_asking, queue);
@@ -224,7 +283,10 @@ fn read_chat(reads: &mut Reads, queue: &mut autoq::Queue, now: f32) {
                 queue.final_kill(now);
                 announce_question(was_asking, queue);
             }
-            Line::Queueing(_) => {}
+            Line::Queueing(_)
+            | Line::QueueingUnknown
+            | Line::QueueingNamed(_)
+            | Line::Joined(..) => {}
         }
     }
     if batch.len() >= 4 {
@@ -276,5 +338,8 @@ fn report_refusal(error: &str) {
         report_once(&format!(
             "Boldy Mods: allow the Commands permission for the auto queue ({error})"
         ));
+    } else {
+        // Retried shortly, but said once, so a command that is never taken is not silent.
+        report_once(&format!("Boldy Mods: auto queue command refused ({error})"));
     }
 }
