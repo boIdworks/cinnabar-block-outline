@@ -10,5 +10,10 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Measures the fuel each feature uses and saves it as `fuel_report` in the settings file. Costs fuel
+# itself, so never in a shipped build: `python scripts/build-mod.py --fuel-profile`.
+fuel-profile = []
+
 [dependencies]
 mod-api.workspace = true

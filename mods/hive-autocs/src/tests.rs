@@ -1,7 +1,8 @@
 use serde_json::json;
 
 use crate::autocs::{
-    AutoCs, FULL_LOBBY, PARTY_COMMAND, PICKER_FORM, PRESET, START_AFTER_TEAMS, WARP_COMMAND, strip,
+    AutoCs, FULL_LOBBY, PARTY_COMMAND, PICKER_FORM, PRESET, START_AFTER_TEAMS, WARP_COMMAND,
+    is_game_over, strip,
 };
 use crate::packets::{self, TEXT, TEXT_CHAT, TEXT_RAW};
 use crate::recorder::{MORE, Recorder, TAG, Way};

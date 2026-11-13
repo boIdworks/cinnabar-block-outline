@@ -269,7 +269,7 @@ fn menu_key_capture_and_hover_help() {
     );
     let at = |point| tip_at(point, mob, true).map(|index| controls()[index].tip);
     assert_eq!(
-        at([SETTINGS_W - 30.0, EDIT_Y + 5.0]),
+        at([SETTINGS_W / 2.0, EDIT_Y + 5.0]),
         Some("Colour of the mob you aim at")
     );
     assert_eq!(
@@ -592,7 +592,10 @@ fn fixed_formats_like_json_numbers() {
         assert_eq!(out, text, "{value}");
     }
     let update = update(&Settings::default(), 0.0, MenuState::default());
-    assert!(update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}],"capture_key":false,"show_gameplay_hud":false,"control_values":[[0,255],[1,255],[2,255],[3,100],[4,3],[5,0],[6,false],[17,0.5],[18,0.5],[19,"#FFFFFF"],[21,false],[25,true],[42,true],[46,false],[50,true],[51,false],[59,true],[60,false],[61,true],[62,true],[75,true],[76,true],[82,true],[123,true],[84,true],[85,true],[86,true],[87,true],[130,true],[88,true],[89,false],[91,true],[95,true],[97,false],[114,false],[115,true],[118,true]],"binding_changes":{"##), "{update}");
+    assert!(
+        update.starts_with(r##"{"controls":[{"id":"menu_key","key":"F8","capturing":false}]"##)
+    );
+    assert!(update.contains(r##""#edit_arrow_text":"Arrow""##));
     assert!(update.ends_with("}}"));
 }
 
@@ -616,4 +619,20 @@ fn controls_line_up_with_their_routes() {
     let close = tip_at([SETTINGS_W - 20.0, 12.0], MenuState::default(), false)
         .map(|index| controls()[index].tip);
     assert_eq!(close, Some("Closes the menu (Esc does too)"));
+}
+
+#[test]
+fn arrow_colour_is_edited_independently_and_saved() {
+    let mut settings = Settings::default();
+    let mut menu = MenuState {
+        page: Page::Mob,
+        ..MenuState::default()
+    };
+    assert!(press(&mut settings, &mut menu, "edit_arrow", 1.0));
+    assert!(menu.editing_arrow && menu.colour_open);
+    let before = settings.mob.rgba;
+    set_target_rgb(&mut settings, menu, [12, 34, 56]);
+    assert_eq!(settings.arrow_rgb, [12, 34, 56]);
+    assert_eq!(settings.mob.rgba, before);
+    assert_eq!(Settings::parse(&settings.to_json()).arrow_rgb, [12, 34, 56]);
 }

@@ -6,6 +6,18 @@ impl AutoCs {
     /// A packet from the server; true when it must not reach the player.
     pub fn from_server(&mut self, packet: &Packet<'_>) -> bool {
         match packet.id {
+            crate::commands::AVAILABLE_COMMANDS
+                if self.run.stage == Stage::Picking && self.changing.is_none() =>
+            {
+                self.picker_cancel_until = None;
+                self.picker_reopen_at = Some(self.tick + 5);
+                false
+            }
+            crate::commands::AVAILABLE_COMMANDS if self.replay_overview.is_some() => {
+                self.replay_form = None;
+                self.replay_reopen_at = Some(self.tick + 5);
+                false
+            }
             packets::TEXT => {
                 if let Some(text) = packets::read_text(packet) {
                     self.server_text(&text);
@@ -25,6 +37,20 @@ impl AutoCs {
             return;
         }
         let plain = strip(&text.message);
+        if is_game_over(&plain)
+            && self.run.started_by_autocs
+            && self.run.stage == Stage::Lobby
+            && !self.awaiting_overview
+        {
+            let overview = serde_json::json!({
+                "type": "form", "title": "Game Over!", "content": "Game over. Choose the next map to replay.",
+                "buttons": [{"text": "Replay CS\nChoose the next map"}, {"text": "Close Overview"}]
+            }).to_string();
+            self.awaiting_overview = true;
+            self.replay_form = Some((REPLAY_FORM, 0));
+            self.replay_overview = Some(overview.clone());
+            packets::form_request(&mut self.to_client, REPLAY_FORM, &overview);
+        }
         if let Some((by, name)) = invite_sent(&plain) {
             let by_mod = self
                 .run

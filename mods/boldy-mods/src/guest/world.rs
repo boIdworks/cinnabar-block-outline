@@ -184,10 +184,32 @@ pub(super) fn last_block_while_loading(
 /// the limit then goes to mobs that can.
 pub(super) fn nearest_boxes(
     actors: &[outline::ActorBox],
+    players: &[bool],
     eye: [f64; 3],
     view: Option<[f64; 3]>,
+    bow_held: bool,
 ) -> Vec<[[f64; 3]; 2]> {
-    outline::nearest_mob_boxes(actors, eye, view, MOB_RANGE, MAX_MOB_BOXES)
+    if !bow_held {
+        return outline::nearest_mob_boxes(actors, eye, view, MOB_RANGE, MAX_MOB_BOXES);
+    }
+    // Only players gain the longer range. Keep the existing nearest-first cap shared with mobs.
+    let eligible: Vec<_> = actors
+        .iter()
+        .zip(players)
+        .filter_map(|(actor, player)| {
+            let b = actor[0];
+            let distance_sq: f64 = (0..3)
+                .map(|axis| {
+                    (b[axis] - eye[axis])
+                        .max(eye[axis] - b[axis + 3])
+                        .max(0.0)
+                        .powi(2)
+                })
+                .sum();
+            (*player || distance_sq <= MOB_RANGE * MOB_RANGE).then_some(*actor)
+        })
+        .collect();
+    outline::nearest_mob_boxes(&eligible, eye, view, ARROW_RANGE, MAX_MOB_BOXES)
 }
 
 /// Everything to draw this frame: other nearby mobs in the mob look, then the aimed block in
@@ -233,6 +255,24 @@ pub(super) fn shapes(target: &Target, settings: &Settings) -> Vec<Shape> {
         // The aimed mob is drawn once, in its aimed look.
         .filter(|shape| !aimed.is_some_and(|aimed| !aimed.block && aimed.same_box(shape)))
         .collect();
+    let mut arrow_look = mobs;
+    let [r, g, b] = settings.arrow_rgb;
+    arrow_look.rgba = [r, g, b, mobs.rgba[3]];
+    arrow_look.rainbow = false;
+    shapes.extend(
+        target
+            .arrows
+            .iter()
+            .filter(|_| settings.mob_on)
+            .map(|[min, max]| Shape {
+                min: *min,
+                max: *max,
+                boxes: outline::Boxes::single(*min, *max),
+                settings: arrow_look,
+                direct: false,
+                block: false,
+            }),
+    );
     shapes.extend(aimed);
     shapes
 }
@@ -240,7 +280,7 @@ pub(super) fn shapes(target: &Target, settings: &Settings) -> Vec<Shape> {
 /// Hitboxes of nearby mobs and players, as Cinnabar uses for picking. Empty without the
 /// Players and Entities permissions; the host only returns the kinds this mod may see.
 /// Each nearby actor's boxes and whether Cinnabar's crosshair would hit it (`None`: unknown).
-pub(super) fn nearby_actor_boxes(eye: [f64; 3]) -> Observed {
+pub(super) fn nearby_actor_boxes(eye: [f64; 3], reach: f32) -> Observed {
     let around_eye = |actor: &player_state::Actor| {
         actor.boxes.iter().any(|b| {
             let (min, max) = ([b.min.0, b.min.1, b.min.2], [b.max.0, b.max.1, b.max.2]);
@@ -249,17 +289,61 @@ pub(super) fn nearby_actor_boxes(eye: [f64; 3]) -> Observed {
         })
     };
     // The host lists the nearest first and every actor read costs about a thousand fuel, so only
-    // the nearest `ACTOR_LIMIT` are asked for: with at most 8 outlined (and only those within
-    // `MOB_RANGE`) and the aimed one always close, the rest of a big crowd is never used.
+    // as many are asked for as were in use last time (those within `MOB_RANGE`, or the reach if
+    // that is longer, and a few to spare): the rest of a crowd is never used. When every actor
+    // read was in use, the next read asks for the most again.
+    let ask = ACTOR_ASK.with(StdCell::get);
+    let range = ARROW_RANGE.max(f64::from(reach)) + ACTOR_RANGE_SPARE;
+    note_read();
     crate::arena::scratch(
-        || player_state::read_actors_limited(ACTOR_LIMIT),
+        || player_state::read_actors_limited(ask),
         |observed| {
             observed
                 .as_ref()
-                .map(|observed| boxes_of(observed.iter().map(|o| &o.actor), &around_eye))
+                .map(|observed| {
+                    let near =
+                        actors_in_range(observed.iter().map(|o| o.actor.position), eye, range);
+                    ACTOR_ASK
+                        .with(|cell| cell.set(next_actor_ask(near, observed.len(), ACTOR_LIMIT)));
+                    let (boxes, hittable, players) =
+                        boxes_of(observed.iter().map(|o| &o.actor), &around_eye);
+                    let arrows = projectile_boxes(observed.iter().map(|o| &o.actor));
+                    (boxes, hittable, arrows, players)
+                })
                 .unwrap_or_default()
         },
     )
+}
+
+/// How many of the actors at `positions`, which the host lists nearest first, are within `range`
+/// of `eye`.
+pub(super) fn actors_in_range(
+    positions: impl Iterator<Item = (f32, f32, f32)>,
+    eye: [f64; 3],
+    range: f64,
+) -> usize {
+    let limit = range * range;
+    positions
+        .take_while(|&(x, y, z)| {
+            let d = [
+                f64::from(x) - eye[0],
+                f64::from(y) - eye[1],
+                f64::from(z) - eye[2],
+            ];
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= limit
+        })
+        .count()
+}
+
+/// How many actors the next read asks for, given that `near` of the `read` returned were in range:
+/// those and a few to spare, so an actor coming into range is caught at once. If all of them were
+/// in range there may be more beyond them, so the most (`max`) is asked for again.
+pub(super) fn next_actor_ask(near: usize, read: usize, max: u32) -> u32 {
+    if near >= read {
+        return max;
+    }
+    let ask = u32::try_from(near.saturating_add(ACTOR_SPARE)).unwrap_or(max);
+    ask.min(max).max(1)
 }
 
 /// Each pickable, visible actor's hitbox as `[min x, min y, min z, max x, max y, max z]`: one
@@ -268,11 +352,17 @@ pub(super) fn nearby_actor_boxes(eye: [f64; 3]) -> Observed {
 pub(super) fn boxes_of<'a>(
     actors: impl Iterator<Item = &'a player_state::Actor>,
     around_eye: &dyn Fn(&player_state::Actor) -> bool,
-) -> Observed {
+) -> (Vec<outline::ActorBox>, Vec<Option<bool>>, Vec<bool>) {
+    let mut players = Vec::with_capacity(16);
     let mut boxes = Vec::with_capacity(16);
     let mut hittable = Vec::with_capacity(16);
     // A box around the eye is the player's own body, not something to outline.
-    for actor in actors.filter(|actor| actor.pickable && !actor.invisible && !around_eye(actor)) {
+    for actor in actors.filter(|actor| {
+        actor.pickable
+            && actor.identifier != "minecraft:arrow"
+            && !actor.invisible
+            && !around_eye(actor)
+    }) {
         let mut bounds = [
             f32::INFINITY,
             f32::INFINITY,
@@ -291,9 +381,43 @@ pub(super) fn boxes_of<'a>(
         if bounds[0].is_finite() {
             boxes.push([bounds.map(f64::from)]);
             hittable.push(actor.hittable);
+            players.push(actor.player);
         }
     }
-    (boxes, hittable)
+    (boxes, hittable, players)
+}
+
+/// Arrow projectiles are usually not pickable, but their observed collision bounds are still
+/// useful to draw. Use the host collision bounds at the arrow tip.
+/// Keep them separate from melee targets so they cannot steal the aimed outline.
+fn projectile_boxes<'a>(
+    actors: impl Iterator<Item = &'a player_state::Actor>,
+) -> Vec<outline::ActorBox> {
+    actors
+        .filter(|actor| actor.identifier == "minecraft:arrow" && !actor.invisible)
+        .filter_map(|actor| {
+            let mut bounds = [
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ];
+            for b in &actor.boxes {
+                let lo = [b.min.0, b.min.1, b.min.2];
+                let hi = [b.max.0, b.max.1, b.max.2];
+                for axis in 0..3 {
+                    bounds[axis] = bounds[axis].min(lo[axis]);
+                    bounds[axis + 3] = bounds[axis + 3].max(hi[axis]);
+                }
+            }
+            if !bounds.iter().all(|n| n.is_finite()) {
+                return None;
+            }
+            Some([bounds.map(f64::from)])
+        })
+        .collect()
 }
 
 /// Lifts the lines just off the block faces so the depth test does not let the faces cut into
@@ -304,7 +428,7 @@ pub(super) const INFLATE: f64 = 0.003;
 /// is joined, and a dimension change or loading gap invalidates every handle (the host bumps its
 /// drawing generation) without running `init` again.
 pub(super) fn ensure_cube(seconds: f32) {
-    let missing = CUBE.with(|cube| cube.borrow().len() != outline::EDGES.len())
+    let missing = CUBE.with(|cube| cube.borrow().len() != outline::CUBE_PIECES)
         || FACE_QUADS.with(|faces| faces.borrow().len() != outline::FACES.len());
     // In a frame to itself: after the HUD layer or the menu patch, a later frame uploads it.
     if !missing
@@ -326,12 +450,19 @@ pub(super) fn forget_cube() {
     UPLOAD_RETRY_AT.with(|at| at.set(0.0));
 }
 
-/// Uploads each unit-cube edge as its own geometry, so a frame can draw only the visible ones.
+/// Uploads a unit edge along each axis (a block's visible lines are these, stretched) and the wire
+/// cube (a mob's whole box as one instance), in the order [`outline::CUBE_PIECES`] says.
 pub(super) fn upload_cube() {
     forget_cube_silently();
-    let mut handles = Vec::with_capacity(outline::EDGES.len());
-    for edge in outline::EDGES {
-        let Ok(spec) = shapes::polyline(&edge.unit_points(), false, [1.0; 4]) else {
+    let mut handles = Vec::with_capacity(outline::CUBE_PIECES);
+    let pieces: [&[[f32; 3]]; outline::CUBE_PIECES] = [
+        &outline::AXIS_UNIT_EDGES[0],
+        &outline::AXIS_UNIT_EDGES[1],
+        &outline::AXIS_UNIT_EDGES[2],
+        &outline::WIRE_PATH,
+    ];
+    for points in pieces {
+        let Ok(spec) = shapes::polyline(points, false, [1.0; 4]) else {
             release(&handles);
             return;
         };
@@ -388,14 +519,23 @@ pub(super) fn draw_outlines(
     mining: bool,
 ) {
     ensure_cube(seconds);
-    // Each shape's outline, worked out (and cached) before the arena below is switched on.
+    // Each shape's outline, worked out (and cached) before the arena below is switched on. A mob's
+    // box is drawn as one wire-cube instance and needs no lines worked out; they are made for it
+    // only if the wire cube is missing (the plain-line fallback below).
+    let wire = CUBE.with(|cube| cube.borrow().len() == outline::CUBE_PIECES);
     let segments: Vec<Vec<outline::Segment>> = shapes
         .iter()
-        .map(|shape| segments_for(&shape.boxes.inflated(INFLATE)))
+        .map(|shape| {
+            if wire && shape.wireframe() {
+                Vec::new()
+            } else {
+                segments_for(&shape.boxes.inflated(INFLATE))
+            }
+        })
         .collect();
     let drawn = CUBE.with(|cube| {
         let cube = cube.borrow();
-        if cube.len() != outline::EDGES.len() {
+        if cube.len() != outline::CUBE_PIECES {
             return Ok(false);
         }
         // Every line is an instance with its own small parameter list; building them in the
@@ -463,9 +603,15 @@ pub(super) fn draw_outlines(
         let width = outline::width_at(shape.settings.width, min, max, camera);
         let [r, g, b, a] = shape.settings.linear_rgba(seconds);
         let a = a * shape.settings.pulse_factor(seconds);
-        let edges = segments[index]
-            .iter()
-            .filter(|segment| segment.visible(camera));
+        // A wire-cube shape has none worked out yet.
+        let own;
+        let all = if segments[index].is_empty() {
+            own = segments_for(&shape.boxes.inflated(INFLATE));
+            &own
+        } else {
+            &segments[index]
+        };
+        let edges = all.iter().filter(|segment| segment.visible(camera));
         if lines.len() + edges.clone().count() > mod_api::MAX_RENDER_RIBBONS {
             break;
         }
@@ -570,12 +716,28 @@ pub(super) fn push_shape(
         let [fr, fg, fb] = settings.fill_srgb(seconds).map(outline::srgb_to_linear);
         faces(instances, (fr * alpha, fg * alpha, fb * alpha, alpha));
     }
+    // A mob's box: all twelve edges as one instance of the wire cube, stretched to the box, in
+    // place of up to nine lines each worked out and sent (the host is paid for each instance).
+    if shape.wireframe()
+        && let Some(wire) = cube.get(outline::WIRE_PIECE)
+        && let [[x0, y0, z0, x1, y1, z1]] = *boxes.as_slice()
+    {
+        let mut line = drawing::instance(*wire, anchor([x0, y0, z0]));
+        line.transform.scale = ((x1 - x0) as f32, (y1 - y0) as f32, (z1 - z0) as f32);
+        line.tint = (r * a, g * a, b * a, a);
+        line.width = width;
+        line.width_mode = draw::WidthMode::Pixels;
+        line.join = draw::Join::Round;
+        line.cap = draw::Cap::Round;
+        instances.push(line);
+        return;
+    }
     for segment in segments {
         if !segment.visible(camera) {
             continue;
         }
         // The unit edge along this axis from the origin, stretched to the segment.
-        let Some(geometry) = cube.get(segment.axis * 4) else {
+        let Some(geometry) = cube.get(segment.axis) else {
             continue;
         };
         let mut line = drawing::instance(*geometry, anchor(segment.start));

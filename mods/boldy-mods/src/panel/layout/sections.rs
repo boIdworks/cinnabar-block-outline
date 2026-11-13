@@ -286,6 +286,14 @@ pub(in crate::panel) fn sections() -> String {
             section("place", COUNTER_CAPTION_Y - pad, row_end(COUNTER_RESET_Y)),
         ],
     ));
+    let armor = behind(shown_when(
+        "armor_page",
+        &[section(
+            "armor_options",
+            ARMOR_CAPTION_Y - pad,
+            row_end(ARMOR_RESET_Y),
+        )],
+    ));
     let cps = behind(shown_when(
         "cps_page",
         &[
@@ -350,7 +358,9 @@ pub(in crate::panel) fn sections() -> String {
             row_end(HOME_KEY_Y),
         )],
     ));
-    format!("{block},{mob},{counter},{cps},{fps},{zoom},{light},{jump},{crosshair},{colour},{home}")
+    format!(
+        "{block},{mob},{counter},{armor},{cps},{fps},{zoom},{light},{jump},{crosshair},{colour},{home}"
+    )
 }
 
 /// The static JSON-UI document; everything that changes comes from bindings. The card is pinned
@@ -410,6 +420,9 @@ pub(in crate::panel) fn document() -> String {
             colour_column().join(",")
         ),
         shown_when("counter_page", &counter_controls()),
+        shown_when("armor_page", &armor_controls()),
+        shown_when("vanilla_page", &vanilla_controls()),
+        shown_when("hive_page", &hive_controls()),
         shown_when("cps_page", &cps_controls()),
         shown_when("fps_page", &fps_controls()),
         shown_when("zoom_page", &zoom_controls()),

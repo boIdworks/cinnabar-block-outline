@@ -22,7 +22,11 @@ impl AutoCs {
     /// The team the player belongs on; `None` leaves them for Hive to place.
     pub(super) fn team_of(&self, player: &str) -> Option<&'static str> {
         if self.in_party(player) {
-            Some("RED")
+            if opponent(&self.run.map) == Some("BLUE") {
+                None
+            } else {
+                Some("RED")
+            }
         } else {
             opponent(&self.run.map)
         }
@@ -132,7 +136,13 @@ impl AutoCs {
         };
         self.notes
             .push(format!("AUTOCS teams red={red:?} other={others:?}"));
-        self.say(&format!("Teams: §cRED§r {red} | {other} {others}"));
+        if opponent(&self.run.map) == Some("BLUE") {
+            self.say(&format!(
+                "Teams: party roles left unchanged | {other} {others}"
+            ));
+        } else {
+            self.say(&format!("Teams: §cRED§r {red} | {other} {others}"));
+        }
     }
 
     // ---- output -------------------------------------------------------------------------------

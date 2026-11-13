@@ -136,8 +136,9 @@ pub(super) const REQUEST_SECONDS: f32 = 0.35;
 /// How long after the menu closed a press may open it again even before gameplay resumes.
 pub(super) const REOPEN_SECONDS: f32 = 1.0;
 
-/// Saves `settings`, telling the player once if that fails.
-pub(super) fn save_settings(settings: &Settings) {
+/// Saves `settings`, telling the player once if that fails. Says whether the file was written, for
+/// a caller that keeps its change pending until it is.
+pub(super) fn save_settings(settings: &Settings) -> bool {
     let mut json = settings.to_json();
     // Extras ride along: the jump resets in full (read back at start), the recorded movement of
     // the last hits, and the fuel each feature uses (neither read back). The file may hold
@@ -169,8 +170,12 @@ pub(super) fn save_settings(settings: &Settings) {
         json.push_str(&extras);
         json.push_str("\n}\n");
     }
-    if let Err(error) = settings::save(&json) {
-        report_once(&format!("Boldy Mods: settings not saved ({error})"));
+    match settings::save(&json) {
+        Ok(()) => true,
+        Err(error) => {
+            report_once(&format!("Boldy Mods: settings not saved ({error})"));
+            false
+        }
     }
 }
 

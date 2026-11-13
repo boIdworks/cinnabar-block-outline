@@ -1,5 +1,4 @@
-//! The HUD editor's logic: the arrow counter, the CPS readout and the FPS counter all show their
-//! frames; one drag moves or resizes one of them. Host-independent, so `cargo test` can check grabbing,
+//! The HUD editor's logic: the arrow counter, CPS, FPS and armor HUD all show their frames; one drag moves or resizes one of them. Host-independent, so `cargo test` can check grabbing,
 //! dragging, snapping, resizing and which element takes the keys.
 
 use crate::counter::{self, Counter, Drag, Edit, Part, Pos};
@@ -43,7 +42,7 @@ pub fn resize_steps(wheel: f32, keys: &[String]) -> f32 {
 /// The editor's state between frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Editor {
-    /// The element grabbed last (0 the arrow counter, 1 the CPS readout, 2 the FPS counter): on
+    /// The element grabbed last (0 arrows, 1 CPS, 2 FPS, 3 armor): on
     /// top when they overlap, and the one the keys act on when the pointer is over none.
     pub selected: usize,
     /// The drag in progress: the element, the part grabbed and how.

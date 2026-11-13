@@ -17,6 +17,84 @@ fn counts_the_clicks_of_the_last_second() {
     assert_eq!(clicks.per_second(9.0), 1);
 }
 
+fn narrow() -> Widths {
+    Widths {
+        caption: 10.0,
+        fps_caption: 10.0,
+        digit: 2.0,
+        space: 1.0,
+        bar: 1.0,
+    }
+}
+
+#[test]
+fn the_probe_starts_on_the_guess_and_measures_at_once() {
+    let probe = WidthProbe::new();
+    assert_eq!(probe.widths(), Widths::GUESS);
+    assert!(probe.due(0.0));
+}
+
+#[test]
+fn a_failed_measurement_keeps_the_guess_and_is_retried_not_cached() {
+    let mut probe = WidthProbe::new();
+    assert!(!probe.observe(0.0, None), "nothing changed");
+    assert_eq!(probe.widths(), Widths::GUESS);
+    assert!(!probe.due(0.5), "not again within the recheck time");
+    assert!(probe.due(RECHECK_SECONDS), "but it does try again");
+}
+
+#[test]
+fn a_measurement_is_confirmed_by_a_second_before_the_probe_goes_quiet() {
+    let mut probe = WidthProbe::new();
+    // The first measurement replaces the guess, which the caller must lay out again for.
+    assert!(probe.observe(0.0, Some(narrow())));
+    assert_eq!(probe.widths(), narrow());
+    assert!(probe.due(1.0), "one reading is not trusted yet");
+    // The same again: nothing changes and it settles, so it stops measuring.
+    assert!(!probe.observe(1.0, Some(narrow())));
+    assert!(!probe.due(100.0));
+}
+
+#[test]
+fn an_early_wrong_measurement_is_corrected_by_a_later_one() {
+    let mut probe = WidthProbe::new();
+    assert!(probe.observe(0.0, Some(narrow())));
+    // The host's fonts became ready and the same text is wider now.
+    assert!(probe.observe(1.0, Some(Widths::GUESS)));
+    assert_eq!(probe.widths(), Widths::GUESS);
+    assert!(probe.due(2.0), "the new reading has to be confirmed too");
+    assert!(!probe.observe(2.0, Some(Widths::GUESS)));
+    assert!(!probe.due(3.0));
+}
+
+#[test]
+fn a_failure_between_two_equal_readings_does_not_settle_them() {
+    let mut probe = WidthProbe::new();
+    probe.observe(0.0, Some(narrow()));
+    probe.observe(1.0, None);
+    probe.observe(2.0, Some(narrow()));
+    assert!(probe.due(3.0), "the readings were not consecutive");
+}
+
+#[test]
+fn reset_measures_again_but_keeps_the_widths_meanwhile() {
+    let mut probe = WidthProbe::new();
+    probe.observe(0.0, Some(narrow()));
+    probe.observe(1.0, Some(narrow()));
+    assert!(!probe.due(50.0));
+    probe.reset();
+    assert!(probe.due(50.0));
+    assert_eq!(probe.widths(), narrow(), "no flash back to the guess");
+}
+
+#[test]
+fn a_settled_probe_stays_quiet_whatever_the_clock_says() {
+    let mut probe = WidthProbe::new();
+    probe.observe(0.0, Some(narrow()));
+    probe.observe(1.0, Some(narrow()));
+    assert!(!probe.due(f32::NAN));
+}
+
 #[test]
 fn a_flood_of_clicks_is_capped_not_overrun() {
     let mut clicks = Clicks::new();

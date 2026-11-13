@@ -22,7 +22,7 @@ The menu writes `block-outline.settings.json` next to the installed mod; you can
   "arrow_counter_scale": 1,
   "zoom": true,
   "zoom_toggle": false,
-  "zoom_scroll": true,
+  "zoom_scroll": false,
   "zoom_sensitivity": true,
   "zoom_level": 4,
   "zoom_time": 0.25,
@@ -57,7 +57,7 @@ Keys:
 - `reach` is the targeting distance in blocks: 5.7 by default, Cinnabar's normal keyboard-and-mouse reach (1–7, file only).
 - `arrow_counter_x` / `arrow_counter_y` with `arrow_counter_anchor_x` / `arrow_counter_anchor_y` (`start`, `centre` or `end`) are the arrow counter's centre, in GUI units from that edge or the middle (without anchors they are shares of the screen, 0–1, and are converted when the mod starts), and `arrow_counter_scale` its size (0.5–4).
 - `cps`, `cps_right`, `cps_x` / `cps_y` with `cps_anchor_x` / `cps_anchor_y` (as for the arrow counter) and `cps_scale` (0.5–4) set the CPS counter.
-- `fps`, `fps_x` / `fps_y` with `fps_anchor_x` / `fps_anchor_y` and `fps_scale` (0.5–4) likewise set the FPS counter.
+- `fps`, `fps_x` / `fps_y` with `fps_anchor_x` / `fps_anchor_y` and `fps_scale` (0.5–4) likewise set the FPS counter, and `fps_coords` (default `false`) adds the coordinates line under it.
 - `zoom_level` is the zoom factor (1.5–10), `zoom_time` its duration in seconds (0–1), `zoom_step` the percent each scroll notch changes it by (5–50) and `zoom_key` the physical key (`KeyZ`, `F6`, …; empty means unbound).
 - `jump_reset` switches the jump reset timer on or off `jump_reset_window` is its perfect window in milliseconds (20–200, on a step of 5) and `jump_reset_carry` the horizontal speed in blocks per tick (0.01–0.4, 0.08 by default) that must be left one tick after the shove to count as knocked back, below it the readout says `Reset!` (file only).
 - `crosshair` switches the custom crosshair on or off, `crosshair_style` is `cross`, `cross_dot`, `t`, `x`, `circle`, `circle_dot` or `dot`, `crosshair_color` a hex code, `crosshair_opacity` 10–100 in steps of 10, and `crosshair_length` (1–20), `crosshair_thickness` (0.5–5) and `crosshair_gap` (0–10) are in GUI pixels, on steps of 0.5.
@@ -71,7 +71,7 @@ The installed file name stays `block-outline.wasm` although the crate is called 
 
 ## Permissions
 
-Declared in `mods\boldy-mods\pack\grants.json`: `terrain` to read block selection shapes, `world_draw` for the outline and fill (round joins and caps), `render` as a fallback line renderer when World drawing is not allowed, `settings` to remember your choices, `controls` for the menu, its key and your jump key, `hud` to notice Hide HUD (F1), draw the arrow counter and the crosshair, and hide the game's crosshair, `player_state` to count the arrows in your inventory and see the hotbar slot move for scroll zoom and to see when you are hurt for jump reset, `camera` (Camera rotation) to apply the zoom, `players` and `entities` to see mobs and players in front of blocks, and `fullbright` for the Fullbright switch.
+Declared in `mods\boldy-mods\pack\grants.json`: `terrain` to read block selection shapes, `world_draw` for the outline and fill (round joins and caps), `render` as a fallback line renderer when World drawing is not allowed, `settings` to remember your choices, `controls` for the menu, its key and your jump key, `hud` to notice Hide HUD (F1), draw the arrow counter and the crosshair, and hide the game's crosshair, `player_state` to count the arrows in your inventory and see the hotbar slot move for scroll zoom and to see when you are hurt for jump reset, `camera` (Camera rotation) to apply the zoom, `players` and `entities` to see mobs and players in front of blocks, `fullbright` for the Fullbright switch, and `commands` (only the names `q` and `p`: the mod sends `/q <mode>` and `/p list`, nothing else) for the auto queue.
 
 ## Cinnabar's own selection
 

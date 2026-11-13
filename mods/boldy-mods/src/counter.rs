@@ -29,7 +29,7 @@ pub const SCALE_STEP: f32 = 0.1;
 impl Default for Counter {
     fn default() -> Self {
         Self {
-            on: true,
+            on: false,
             bow_only: false,
             pos: DEFAULT_POS,
             scale: 1.0,
@@ -679,6 +679,12 @@ pub(crate) const DOCUMENT: &str = concat!(
     ",",
     crate::fps::document!(),
     ",",
+    crate::hotbar::document!(),
+    ",",
+    crate::armor::document!(),
+    ",",
+    crate::effects::document!(),
+    ",",
     crate::jumpreset::document!(),
     ",",
     // While moving: the guide lines the element snapped to.
@@ -802,6 +808,12 @@ pub fn surface() -> String {
     initial.push_str(&crate::cps::initial_bindings());
     initial.push(',');
     initial.push_str(&crate::fps::initial_bindings());
+    initial.push(',');
+    initial.push_str(&crate::hotbar::initial_bindings());
+    initial.push(',');
+    initial.push_str(&crate::armor::initial_bindings());
+    initial.push(',');
+    initial.push_str(&crate::effects::initial_bindings());
     initial.push(',');
     initial.push_str(&crate::jumpreset::initial_bindings());
     initial.push(',');

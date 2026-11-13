@@ -32,16 +32,21 @@ pub struct Settings {
     pub fullbright: bool,
     /// A key that switches fullbright on and off in game, if one is set.
     pub fullbright_key: Option<KeyName>,
+    /// Queue the next game by itself when a Hive game ends (needs the commands permission).
+    pub auto_queue: bool,
     /// Outline every nearby mob, not only the one aimed at.
     pub show_all_mobs: bool,
     /// Line colour of the mob aimed at while every nearby mob is outlined.
     pub aim_rgb: [u8; 3],
+    /// Independent colour for arrow projectiles.
+    pub arrow_rgb: [u8; 3],
     /// Saved colours, filled by the menu's Save button.
     pub favourites: [Option<[u8; 4]>; FAVOURITES],
     /// The slot the next Save writes, oldest first.
     pub next_favourite: u8,
     /// The HUD arrow counter, set on the menu's Arrow counter page.
     pub counter: crate::counter::Counter,
+    pub armor: crate::armor::Armor,
     /// Zoom, set on the menu's Zoom page.
     pub zoom: crate::zoom::Zoom,
     /// The clicks-per-second readout, set on the menu's Arrow counter page.
@@ -55,6 +60,12 @@ pub struct Settings {
     pub block_on: bool,
     /// Whether mob hitboxes are drawn; switched on the menu's start page.
     pub mob_on: bool,
+    /// Hide Cinnabar's hunger row.
+    pub hide_hunger: bool,
+    /// Show the remaining time under each status-effect icon.
+    pub effect_timers: bool,
+    /// Show the key bound to each hotbar slot.
+    pub hotbar_keys: bool,
 }
 
 /// The aimed mob's default colour: a clear red.
@@ -189,18 +200,24 @@ impl Default for Settings {
             mob: Style::DEFAULT,
             show_all_mobs: true,
             aim_rgb: DEFAULT_AIM,
+            arrow_rgb: [255, 255, 255],
             fullbright: false,
             fullbright_key: None,
+            auto_queue: false,
             favourites: [None; FAVOURITES],
             next_favourite: 0,
             counter: crate::counter::Counter::default(),
+            armor: crate::armor::Armor::default(),
             zoom: crate::zoom::Zoom::default(),
             cps: crate::cps::Cps::default(),
             fps: crate::fps::Fps::default(),
             jump_reset: crate::jumpreset::JumpReset::default(),
             crosshair: crate::crosshair::DEFAULT,
-            block_on: true,
-            mob_on: true,
+            block_on: false,
+            mob_on: false,
+            hide_hunger: false,
+            effect_timers: false,
+            hotbar_keys: false,
         }
     }
 }
@@ -333,8 +350,20 @@ impl Settings {
         if let Some(key) = string_field(json, "fullbright_key") {
             settings.fullbright_key = KeyName::new(key);
         }
+        if let Some(on) = bool_field(json, "auto_queue") {
+            settings.auto_queue = on;
+        }
         if let Some(on) = bool_field(json, "block_on") {
             settings.block_on = on;
+        }
+        if let Some(on) = bool_field(json, "hide_hunger") {
+            settings.hide_hunger = on;
+        }
+        if let Some(on) = bool_field(json, "effect_timers") {
+            settings.effect_timers = on;
+        }
+        if let Some(on) = bool_field(json, "hotbar_keys") {
+            settings.hotbar_keys = on;
         }
         if let Some(on) = bool_field(json, "mob_on") {
             settings.mob_on = on;
@@ -344,6 +373,9 @@ impl Settings {
         }
         if let Some([r, g, b, _]) = string_field(json, "aim_color").and_then(parse_color) {
             settings.aim_rgb = [r, g, b];
+        }
+        if let Some([r, g, b, _]) = string_field(json, "arrow_color").and_then(parse_color) {
+            settings.arrow_rgb = [r, g, b];
         }
         if let Some(list) = string_field(json, "favourites") {
             for (slot, code) in settings.favourites.iter_mut().zip(list.split(',')) {
@@ -383,6 +415,33 @@ impl Settings {
         // An empty (or unusable) name is an unbound key, as for the light key.
         if let Some(key) = string_field(json, "zoom_key") {
             settings.zoom.key = KeyName::new(key);
+        }
+        if let (Some(x), Some(y), Some(ax), Some(ay)) = (
+            number_field(json, "armor_x"),
+            number_field(json, "armor_y"),
+            string_field(json, "armor_anchor_x").and_then(crate::counter::Anchor::from_name),
+            string_field(json, "armor_anchor_y").and_then(crate::counter::Anchor::from_name),
+        ) {
+            settings.armor.pos = crate::counter::Pos {
+                anchor: [ax, ay],
+                off: [x, y],
+            }
+            .sanitised();
+        }
+        if let Some(scale) = number_field(json, "armor_scale") {
+            settings.armor.scale = crate::counter::clamp_scale(scale);
+        }
+        if let Some(on) = bool_field(json, "armor_on") {
+            settings.armor.on = on;
+        }
+        if let Some(on) = bool_field(json, "armor_horizontal") {
+            settings.armor.horizontal = on;
+        }
+        if let Some(on) = bool_field(json, "armor_percent") {
+            settings.armor.percent = on;
+        }
+        if let Some(on) = bool_field(json, "armor_background") {
+            settings.armor.background = on;
         }
         if let Some(on) = bool_field(json, "arrow_counter") {
             settings.counter.on = on;
@@ -452,6 +511,9 @@ impl Settings {
         if let Some(scale) = number_field(json, "fps_scale") {
             settings.fps.scale = crate::cps::clamp_scale(scale);
         }
+        if let Some(on) = bool_field(json, "fps_coords") {
+            settings.fps.coords = on;
+        }
         if let Some(on) = bool_field(json, "jump_reset") {
             settings.jump_reset.on = on;
         }
@@ -507,6 +569,9 @@ impl Settings {
         field("mob_width", self.mob.width.to_string());
         field("block_on", self.block_on.to_string());
         field("mob_on", self.mob_on.to_string());
+        field("hide_hunger", self.hide_hunger.to_string());
+        field("effect_timers", self.effect_timers.to_string());
+        field("hotbar_keys", self.hotbar_keys.to_string());
         field("show_all_mobs", self.show_all_mobs.to_string());
         field("fullbright", self.fullbright.to_string());
         field(
@@ -516,8 +581,11 @@ impl Settings {
                 self.fullbright_key.as_ref().map_or("", KeyName::as_str)
             ),
         );
+        field("auto_queue", self.auto_queue.to_string());
         let [r, g, b] = self.aim_rgb;
         field("aim_color", format!("\"{}\"", hex_code([r, g, b, 255])));
+        let [r, g, b] = self.arrow_rgb;
+        field("arrow_color", format!("\"{}\"", hex_code([r, g, b, 255])));
         field("highlight_cancel", self.highlight_cancel.to_string());
         field("favourites", format!("\"{}\"", favourites.join(",")));
         field("next_favourite", self.next_favourite.to_string());
@@ -535,6 +603,21 @@ impl Settings {
         );
         field("arrow_counter", self.counter.on.to_string());
         field("arrow_counter_bow_only", self.counter.bow_only.to_string());
+        field("armor_x", self.armor.pos.off[0].to_string());
+        field("armor_y", self.armor.pos.off[1].to_string());
+        field(
+            "armor_anchor_x",
+            format!("\"{}\"", self.armor.pos.anchor[0].name()),
+        );
+        field(
+            "armor_anchor_y",
+            format!("\"{}\"", self.armor.pos.anchor[1].name()),
+        );
+        field("armor_scale", self.armor.scale.to_string());
+        field("armor_on", self.armor.on.to_string());
+        field("armor_horizontal", self.armor.horizontal.to_string());
+        field("armor_percent", self.armor.percent.to_string());
+        field("armor_background", self.armor.background.to_string());
         field("arrow_counter_x", self.counter.pos.off[0].to_string());
         field("arrow_counter_y", self.counter.pos.off[1].to_string());
         field(
@@ -572,6 +655,7 @@ impl Settings {
             format!("\"{}\"", self.fps.pos.anchor[1].name()),
         );
         field("fps_scale", self.fps.scale.to_string());
+        field("fps_coords", self.fps.coords.to_string());
         field("jump_reset", self.jump_reset.on.to_string());
         field("jump_reset_window", self.jump_reset.window.to_string());
         field("jump_reset_carry", self.jump_reset.knockback.to_string());
@@ -618,13 +702,16 @@ impl Settings {
             mob: self.mob,
             show_all_mobs: self.show_all_mobs,
             aim_rgb: self.aim_rgb,
+            arrow_rgb: self.arrow_rgb,
             fullbright: self.fullbright,
             fullbright_key: self.fullbright_key,
+            auto_queue: self.auto_queue,
             menu_key: self.menu_key,
             highlight_cancel: self.highlight_cancel,
             favourites: self.favourites,
             next_favourite: self.next_favourite,
             counter: self.counter,
+            armor: self.armor,
             zoom: self.zoom,
             cps: self.cps,
             fps: self.fps,
@@ -632,6 +719,9 @@ impl Settings {
             crosshair: self.crosshair,
             block_on: self.block_on,
             mob_on: self.mob_on,
+            hide_hunger: self.hide_hunger,
+            effect_timers: self.effect_timers,
+            hotbar_keys: self.hotbar_keys,
             ..Self::default()
         };
     }

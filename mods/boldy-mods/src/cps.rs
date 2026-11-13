@@ -29,7 +29,7 @@ pub struct Cps {
 impl Default for Cps {
     fn default() -> Self {
         Self {
-            on: true,
+            on: false,
             right: true,
             zeros: true,
             pos: DEFAULT_POS,
@@ -238,6 +238,73 @@ impl Widths {
     /// so it keeps its size from 100 down to 0.
     pub fn fps_width(&self, fps: u32) -> f32 {
         self.fps_caption + self.space + self.digit * crate::counter::digits(fps).max(3) as f32
+    }
+}
+
+/// How long to wait between measurements of the text while they are not settled, in seconds.
+pub const RECHECK_SECONDS: f32 = 1.0;
+
+/// Keeps the measured [`Widths`] right. The host may not be able to measure yet when the mod
+/// starts, or may answer before its fonts are ready, and a box cut to those widths clips the
+/// text to `...`. So it measures again, at most once per [`RECHECK_SECONDS`], until two
+/// successful measurements in a row agree; after that it costs nothing (no host calls) until
+/// [`WidthProbe::reset`] (a new GUI scale). Until a measurement succeeds the guess is used.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WidthProbe {
+    widths: Widths,
+    last: Option<Widths>,
+    settled: bool,
+    next_at: f32,
+}
+
+impl WidthProbe {
+    pub const fn new() -> Self {
+        Self {
+            widths: Widths::GUESS,
+            last: None,
+            settled: false,
+            next_at: 0.0,
+        }
+    }
+
+    /// The widths to lay out with now.
+    pub fn widths(&self) -> Widths {
+        self.widths
+    }
+
+    /// Whether to measure now.
+    pub fn due(&self, now: f32) -> bool {
+        !self.settled && now >= self.next_at
+    }
+
+    /// Takes the result of a measurement (`None` if the host could not measure). Returns whether
+    /// the widths in use changed, so what was laid out with the old ones must be redone.
+    pub fn observe(&mut self, now: f32, measured: Option<Widths>) -> bool {
+        self.next_at = now + RECHECK_SECONDS;
+        let Some(measured) = measured else {
+            // Keep what is in use (the guess, or the last good measurement) and try again.
+            self.last = None;
+            return false;
+        };
+        let changed = measured != self.widths;
+        self.widths = measured;
+        self.settled = self.last == Some(measured);
+        self.last = Some(measured);
+        changed
+    }
+
+    /// Measure again from the next call, keeping the widths in use meanwhile (the GUI scale
+    /// changed).
+    pub fn reset(&mut self) {
+        self.last = None;
+        self.settled = false;
+        self.next_at = 0.0;
+    }
+}
+
+impl Default for WidthProbe {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

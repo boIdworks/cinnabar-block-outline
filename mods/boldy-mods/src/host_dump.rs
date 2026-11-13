@@ -39,6 +39,43 @@ fn host_dump() {
 
     // The HUD layer and every crosshair it can show.
     dump.write("hud_set", "surface", &crate::counter::surface());
+    for horizontal in [true, false] {
+        let armor = crate::armor::Armor {
+            horizontal,
+            scale: 2.0,
+            ..Default::default()
+        };
+        let layout = crate::armor::layout_bindings(
+            armor,
+            [427.0, 240.5],
+            Some(crate::counter::Edit::default()),
+            [Some(100), Some(50), Some(10), None],
+        );
+        dump.write(
+            "hud_patch",
+            if horizontal {
+                "armor-resized-horizontal"
+            } else {
+                "armor-resized-vertical"
+            },
+            &format!(r#"{{"binding_changes":{{{layout}}}}}"#),
+        );
+    }
+    // The FPS counter with its coordinates line: both lines, and the coordinates alone.
+    let widths = crate::cps::Widths::GUESS;
+    let coords = [-12, 64, 1234];
+    for (label, width) in [("fps-and-coords", 40.0), ("coords-only", 0.0)] {
+        let view = crate::fps::View {
+            visible: true,
+            fps: 144,
+            scale: 1.5,
+            width,
+            coords: Some((coords, crate::fps::coords_width(&widths, coords))),
+            offset: [9.0, 35.0],
+            edit: Some(crate::counter::Edit::default()),
+        };
+        dump.write("hud_patch", label, &crate::fps::patch(&view));
+    }
     let viewport = [427.0, 240.5, 3.0];
     // A checkerboard, far too detailed: it is drawn in part.
     let mut checks = Drawing::empty(64);
@@ -160,6 +197,7 @@ fn host_dump() {
         Page::Fps,
         Page::Zoom,
         Page::Lighting,
+        Page::HiveUtilities,
         Page::JumpReset,
         Page::Crosshair,
     ];

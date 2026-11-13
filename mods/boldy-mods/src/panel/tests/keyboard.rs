@@ -45,7 +45,7 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
     assert_eq!(enter(&s, &mut m), vec![("open_block".to_owned(), 1.0)]);
     // Down visits the page buttons, then the menu key; Up goes back.
     let mut seen = Vec::new();
-    for _ in 0..10 {
+    for _ in 0..13 {
         keyed(&s, &mut m, &["ArrowDown"]);
         seen.push(enter(&s, &mut m).remove(0).0);
     }
@@ -60,20 +60,23 @@ fn the_keyboard_walks_the_start_page_and_presses_controls() {
             "open_light",
             "open_jump",
             "open_crosshair",
+            "open_armor",
+            "open_vanilla",
+            "open_hive",
             "menu_key",
             "close"
         ]
     );
     // Down from the close button reaches the switch right below it, and Up comes back.
     keyed(&s, &mut m, &["ArrowDown"]);
-    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 0.0)]);
+    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 1.0)]);
     keyed(&s, &mut m, &["ArrowUp"]);
     assert_eq!(enter(&s, &mut m)[0].0, "close");
     // Right from a page button reaches its switch, which Enter flips, and Left goes back.
     keyed(&s, &mut m, &["Tab"]);
     assert_eq!(enter(&s, &mut m)[0].0, "open_block");
     keyed(&s, &mut m, &["ArrowRight"]);
-    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 0.0)]);
+    assert_eq!(enter(&s, &mut m), vec![("home_block".to_owned(), 1.0)]);
     keyed(&s, &mut m, &["ArrowLeft"]);
     assert_eq!(enter(&s, &mut m)[0].0, "open_block");
     // Shift-less Tab also goes forward, and the focus ring and bottom line follow it.

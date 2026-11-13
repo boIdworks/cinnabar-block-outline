@@ -8,6 +8,7 @@ Install the Rust toolchain and the `wasm32-unknown-unknown` target pinned in `ru
 ```powershell
 python scripts\build-mod.py       # build, pack and install Boldy Mods (add --no-install to only build)
 python scripts\build-autocs.py    # the same for Hive Auto CS
+python scripts\build-mod.py --fuel-profile   # temporary: also measures fuel per feature (see architecture.md)
 
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -15,7 +16,11 @@ cargo clippy -p boldy-mods -p hive-autocs --target wasm32-unknown-unknown --rele
 cargo test --workspace --locked
 python scripts\check-host.py      # needs: pip install wasmtime
 python scripts\jump-reset-report.py --self-test
+python scripts\doctor.py --self-test     # also checks both Cinnabar pins match
 ```
+
+When the mod misbehaves in the game, run `python scripts\doctor.py` (it needs your Cinnabar
+install, so CI only runs its self-test) and see [docs/stability.md](docs/stability.md).
 
 CI (`.github/workflows/ci.yml`) runs all of these on every push and pull request. The wasm clippy
 run still matters: it checks the code exactly as it ships.

@@ -30,7 +30,8 @@ fn closing_the_map_menu_cancels() {
     h.client(&chat("!autocs"));
     let mut answer = Vec::new();
     packets::form_cancel(&mut answer, PICKER_FORM);
-    let (_, sent) = h.client(&answer);
+    h.client(&answer);
+    let sent = h.run(100);
     assert!(sent.said("Cancelled"));
     assert!(sent.commands.is_empty());
 }
@@ -99,13 +100,15 @@ fn full_run_creates_sets_preset_map_and_teams() {
     assert_eq!(players.len() as u32, FULL_LOBBY);
     let (sent, next) = h.set_roles(22, &mut players);
     let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
-    // RED: the user and H0nri, who is in the party; BLUE: everyone else.
+    // Party members stay as they are; everyone else is set to BLUE.
     assert_eq!(
         teams,
-        ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]
+        [
+            "Player", "BLUE", "Player", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"
+        ]
     );
     assert!(
-        sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"),
+        sent.said("party roles left unchanged | BLUE Charlie, P2"),
         "{:?}",
         sent.said
     );
@@ -136,7 +139,7 @@ fn full_run_creates_sets_preset_map_and_teams() {
 }
 
 #[test]
-fn players_who_join_the_party_after_autocs_are_put_on_red() {
+fn players_who_join_the_party_after_autocs_are_not_put_on_blue() {
     let mut h = Harness::new();
     // Created before the party is full: only the user was in it.
     h.join_lobby("Party members (1): Boldworks");
@@ -183,10 +186,12 @@ fn players_who_join_the_party_after_autocs_are_put_on_red() {
     let teams: Vec<&str> = players.iter().map(|(_, role)| role.as_str()).collect();
     assert_eq!(
         teams,
-        ["RED", "BLUE", "RED", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"]
+        [
+            "Player", "BLUE", "Player", "BLUE", "BLUE", "BLUE", "BLUE", "BLUE"
+        ]
     );
     assert!(
-        sent.said("RED Boldworks, H0nri | BLUE Charlie, P2"),
+        sent.said("party roles left unchanged | BLUE Charlie, P2"),
         "{:?}",
         sent.said
     );
@@ -386,4 +391,144 @@ fn mark_adds_a_note() {
         h.auto.take_notes(),
         vec!["MARK picking the map".to_string()]
     );
+}
+
+#[test]
+fn game_over_replay_opens_map_picker_and_preserves_other_buttons() {
+    let mut h = Harness::new();
+    h.create("!autocs temple", "Party: Boldworks", 1);
+    let overview = menu(
+        900,
+        "§5§lGame Over!",
+        "Overview",
+        &[("Close Overview", ""), ("Exit to Hub", "")],
+    );
+    let (kept, sent) = h.server(&overview);
+    assert!(!kept);
+    let displayed: serde_json::Value = serde_json::from_str(&sent.forms[0].1).unwrap();
+    assert_eq!(displayed["buttons"].as_array().unwrap().len(), 3);
+    let mut response = Vec::new();
+    packets::form_response(&mut response, 900, "0\n");
+    let (kept, sent) = h.client(&response);
+    assert!(!kept);
+    assert_eq!(sent.answers, vec![(900, None)]);
+    assert_eq!(sent.forms[0].0, PICKER_FORM);
+}
+
+#[test]
+fn picker_reopens_after_server_change_even_if_closed_during_transfer() {
+    let mut h = Harness::new();
+    h.client(&chat("!autocs"));
+    let mut cancel = Vec::new();
+    packets::form_cancel(&mut cancel, PICKER_FORM);
+    h.client(&cancel);
+    let mut batch = Vec::new();
+    push_packet(&mut batch, crate::commands::AVAILABLE_COMMANDS, &[]);
+    let (_, sent) = h.server(&batch);
+    assert_eq!(sent.forms[0].0, PICKER_FORM);
+    assert!(!h.run(100).said("Cancelled"));
+}
+
+#[test]
+fn replay_is_absent_in_manually_managed_games_and_other_buttons_keep_their_meaning() {
+    let overview = menu(
+        900,
+        "Game Over!",
+        "Overview",
+        &[("Close Overview", ""), ("Exit to Hub", "")],
+    );
+    let mut manual = Harness::new();
+    manual.client(&chat("@Someone spec"));
+    assert!(manual.server(&overview).0);
+    let mut auto = Harness::new();
+    auto.create("!autocs temple", "Party: Boldworks", 1);
+    let (_, sent) = auto.server(&overview);
+    let displayed: serde_json::Value = serde_json::from_str(&sent.forms[0].1).unwrap();
+    assert!(
+        displayed["buttons"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Replay CS")
+    );
+    let mut response = Vec::new();
+    packets::form_response(&mut response, 900, "2\n");
+    let (kept, sent) = auto.client(&response);
+    assert!(!kept);
+    assert_eq!(sent.answers, vec![(900, Some("1\n".into()))]);
+}
+
+#[test]
+fn game_over_screen_reopens_after_transfer_and_replay_opens_picker() {
+    let mut h = Harness::new();
+    h.create("!autocs temple", "Party: Boldworks", 1);
+    h.server(&menu(
+        900,
+        "Game Over!",
+        "Overview",
+        &[("Close Overview", ""), ("Exit to Hub", "")],
+    ));
+    let mut batch = Vec::new();
+    push_packet(&mut batch, crate::commands::AVAILABLE_COMMANDS, &[]);
+    let (_, sent) = h.server(&batch);
+    let (id, json) = &sent.forms[0];
+    let displayed: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert!(
+        displayed["buttons"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Replay CS")
+    );
+    let mut response = Vec::new();
+    packets::form_response(&mut response, *id, "0\n");
+    let (kept, sent) = h.client(&response);
+    assert!(!kept);
+    assert!(sent.answers.is_empty());
+    assert_eq!(sent.forms[0].0, PICKER_FORM);
+}
+
+#[test]
+fn game_over_message_immediately_offers_replay_before_hives_overview() {
+    let mut h = Harness::new();
+    h.create("!autocs temple", "Party: Boldworks", 1);
+    let (_, sent) = h.server(&system("Game OVER!"));
+    let (id, json) = &sent.forms[0];
+    let displayed: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert!(
+        displayed["buttons"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Replay CS")
+    );
+    let mut answer = Vec::new();
+    packets::form_response(&mut answer, *id, "0\n");
+    let (_, sent) = h.client(&answer);
+    assert_eq!(sent.forms[0].0, PICKER_FORM);
+    let (kept, _) = h.server(&menu(
+        900,
+        "Game Over!",
+        "Overview",
+        &[("Close Overview", "")],
+    ));
+    assert!(!kept);
+}
+
+/// Hive's end-of-game line as recorded in the log, with its `»` and colours.
+const GAME_OVER_LINE: &str = "§c§l» §r§c§lGame OVER!";
+
+#[test]
+fn game_over_line_is_read_with_hives_symbol() {
+    assert!(is_game_over(&strip(GAME_OVER_LINE)));
+    assert!(is_game_over("Game OVER!"));
+    assert!(is_game_over("? Game over!"));
+    assert!(!is_game_over("» Magenta Team are the WINNERS!"));
+    assert!(!is_game_over("» Game OVER! Really?"));
+}
+
+#[test]
+fn hives_real_game_over_line_offers_the_replay_menu() {
+    let mut h = Harness::new();
+    h.create("!autocs temple", "Party: Boldworks", 1);
+    let (_, sent) = h.server(&system(GAME_OVER_LINE));
+    assert_eq!(sent.forms.len(), 1, "the replay menu");
+    assert!(h.run(60).commands.is_empty());
 }

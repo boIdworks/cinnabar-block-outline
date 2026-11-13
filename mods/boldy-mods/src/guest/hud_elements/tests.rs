@@ -72,3 +72,20 @@ fn a_part_never_sent_counts_as_empty() {
     sent.1[0] = None;
     assert_eq!(next_step(&plan(5), &sent), None);
 }
+
+#[test]
+fn hidden_hunger_and_crosshair_are_composed() {
+    assert!(hidden_elements(false, false).is_empty());
+    assert_eq!(
+        hidden_elements(true, false),
+        vec![hud::VanillaElement::Crosshair]
+    );
+    assert_eq!(
+        hidden_elements(false, true),
+        vec![hud::VanillaElement::Hunger]
+    );
+    assert_eq!(
+        hidden_elements(true, true),
+        vec![hud::VanillaElement::Crosshair, hud::VanillaElement::Hunger]
+    );
+}

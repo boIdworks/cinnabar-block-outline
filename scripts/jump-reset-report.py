@@ -65,16 +65,17 @@ def format_row(row):
 def analyse(rows, window_ms, threshold):
     """A dict describing what the recorded hits say about `threshold`."""
     reach = window_ms * WINDOW_FACTOR
-    grounded = [r for r in rows if r[2] is not False]
+    grounded = [r for r in rows if r[2] is True]
     jumped = [r for r in grounded if r[0] is not None and abs(r[0]) <= reach]
-    other = [r for r in grounded if r not in jumped]
+    other = [r for r in grounded if r[0] is None or abs(r[0]) > reach]
     result = {
         "hits": len(rows),
         "grounded": len(grounded),
+        "unknown_ground": sum(1 for r in rows if r[2] is None),
         "jumped": len(jumped),
         "other": len(other),
         "threshold": threshold,
-        "counted": sum(1 for r in jumped if r[1] <= threshold),
+        "counted": sum(1 for r in jumped if r[1] < threshold),
         "recommendation": None,
         "note": "",
     }
@@ -154,11 +155,28 @@ def report(path, use_history=True):
     print(f"{result['hits']} hits recorded, {result['grounded']} on the ground "
           f"({result['jumped']} with a jump inside {window * WINDOW_FACTOR} ms, "
           f"{result['other']} without).")
+    if result["unknown_ground"]:
+        print(f"Excluded {result['unknown_ground']} hits with unknown ground status.")
     print(f"Current threshold {threshold}: {result['counted']} of {result['jumped']} jumped hits "
           "count as a reset.")
     print(result["note"])
     if result["recommendation"] is not None:
         print(f'Suggested: "jump_reset_carry": {result["recommendation"]}')
+    return 0
+
+
+def clear_data(path):
+    """Remove recorded jump data, leaving the other settings intact."""
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("jump_reset_log", "jump_reset_trace", "jump_reset_resets"):
+            settings.pop(key, None)
+        path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        history_path(path).unlink(missing_ok=True)
+    except (OSError, ValueError, AttributeError) as error:
+        print(f"Could not clear jump reset data: {error}", file=sys.stderr)
+        return 2
+    print("Jump reset data cleared.")
     return 0
 
 
@@ -186,6 +204,10 @@ def self_test():
     # Hits taken in the air are ignored.
     air = [(0, 0.3, False, 0.3) for _ in range(20)]
     assert analyse(resets + failed + plain + air, 75, 0.08)["grounded"] == 12
+    unknown = [(0, 0.04, None, 0.3) for _ in range(20)]
+    assert analyse(unknown, 75, 0.08)["recommendation"] is None
+    assert analyse(unknown, 75, 0.08)["unknown_ground"] == 20
+    assert analyse([(0, 0.08, True, 0.3)], 75, 0.08)["counted"] == 0
 
     # Every jump the same: no split to find.
     same = [(0, 0.1, True, 0.3) for _ in range(12)]
@@ -209,6 +231,8 @@ def main():
     args = sys.argv[1:]
     if args == ["--self-test"]:
         return self_test()
+    if args and args[0] == "clear":
+        return clear_data(settings_path(args[1:]))
     keep = "--no-history" not in args
     args = [a for a in args if a != "--no-history"]
     return report(settings_path(args), keep)

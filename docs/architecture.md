@@ -27,9 +27,10 @@ most of the code is testable and the part that is not is thin glue.
 | `hudedit.rs` | the on-screen editor that moves and resizes those three | yes |
 | `jumpreset.rs` | jump timing, knock-left measurement, the recorded log | yes |
 | `zoom.rs` | smooth zoom, scroll steps | yes |
+| `autoq.rs` | auto queue: reading Hive's "Finding you a game of ...", "Game OVER!", party-out and "FINAL KILL!" chat lines (`read_line`), telling the player's own elimination (Hive's "You were eliminated", or `alive` turning off plus a final kill), the `/p list` party check, and the timing of the `/q` command (`Queue`) | yes |
 | `panel/` | the F8 menu: `ids` and `metrics` (control ids and layout constants), `layout/` (widgets, pages, sections), `controls/` (the control table, `nav` for keyboard focus), `events` (what clicks and typing change), `bindings` (live captions and colours), `content` (the full document and its patches), `help` (hover help) | yes |
 | `arena.rs` | bump allocator for big host replies (see below) | yes |
-| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements) | only the helpers that do not call the host (terrain lookup, targeting, crosshair send order, fuel report); the host calls themselves run only in the game |
+| `guest.rs` + `guest/` | lifecycle and per-frame behaviour: `world` (terrain sample, mobs, drawing), `menu` (menu events, key capture, saving), `fuel` (budget and profile), `hud_elements` (HUD elements), `queue` (the auto queue's chat reads, the life read, the party question and the command) | only the helpers that do not call the host (terrain lookup, targeting, crosshair send order, fuel report); the host calls themselves run only in the game |
 | `host_dump.rs` | writes every document the mod can send, for `scripts/check-host.py` | test-only |
 
 ### `mods/hive-autocs/src`
@@ -62,8 +63,49 @@ Most of the unusual structure follows from that:
   type with unit tests; only the `#[global_allocator]` that routes the guest's allocations
   through one is wasm-only. All `unsafe` in it carries a `SAFETY` comment and
   `clippy::undocumented_unsafe_blocks` keeps it that way.
-- **`guest/fuel.rs`** has an optional per-feature profile (`PROFILE`), and the start page shows a
-  fuel meter (last frame, busiest frame).
+- **Player-state reads are capped at eight per frame, and going over quarantines the mod** (`player-state read budget exhausted`; the host traps rather than refusing). A frame with every feature on already makes about eight, so every `player_state::read_*` call in the mod is preceded by `note_read()` (`guest/queue.rs`), the auto queue runs after the rest of the frame and makes at most one read, and only when the count says the frame has one left. Any new feature that reads player state must do the same; a loop of reads in one frame is never safe.
+- **`guest/fuel.rs`** tracks fuel two ways. `FrameFuel` is always on and nearly free (no host
+  calls, a few integer operations a frame): the start page shows its average, the busiest frame of
+  the last few seconds ("recent") and the busiest ever ("peak"). The per-feature profile
+  (`PROFILE`) says where a frame's fuel goes, but costs fuel itself, so it only exists in a build
+  made with `python scripts\build-mod.py --fuel-profile` (the cargo feature `fuel-profile`); it
+  saves `fuel_report` (`name=average/most/calls` per feature) to the settings file. Rebuild without
+  the flag afterwards. Read the report with two things in mind: each average is **per call**, not
+  per frame (the third number, the calls, says how often a section ran), and some sections lie
+  inside others (`armor` in `arrow`, `hotbar` in `cps`, `xh_grid` in `crosshair`), so adding them
+  up counts work twice. The `total` is the whole frame: the bookkeeping that costs fuel itself
+  (`fuel_save`, the profile's periodic save, and `fuel_show`, the start page's fuel line) runs
+  *before* it is taken, on the previous frames' numbers, so a frame that saved is not understated.
+- **What the profile found, so it is not found again.** (1) Comparing a large array with the
+  derived `==` is a byte-by-byte `bcmp` in wasm: the crosshair's 64-row drawing cost about 12,000
+  fuel *every frame* just to check it had not changed. `Drawing` now compares only its rows in use,
+  and the crosshair plan is re-checked only when the settings revision (`SETTINGS_REV`, bumped by
+  `set_settings`, the one place settings are replaced) or the HUD size changes: 38 fuel a frame.
+  Never compare or copy a big settings field per frame; read the few fields with `settings_with`.
+  (2) The actor read costs about 1,000 fuel an actor, so it asks only for as many as were in range
+  last time plus a few (`ACTOR_ASK`, up to `ACTOR_LIMIT`), and the most again when every actor read
+  was in range. (3) The game's HUD-element list (about 30,000 fuel) is read five times a second for
+  both the hidden-HUD check and the custom crosshair. (4) Every drawn line is an instance sent to
+  the host, about 400 fuel each, so a mob's box is drawn as one instance of a wire cube
+  (`outline::WIRE_PATH`, 16 points through all twelve edges; the three retraced ones are the least
+  a single path can do) instead of up to nine edge lines: `draw` fell from 18,000-31,000 to 2,700 a
+  frame in a crowd. A block keeps its per-edge lines (`Shape::wireframe` tells them apart), so it
+  still shows only the side facing the camera. What is left is mostly the actor read, which costs
+  about 800 fuel an actor and has no lighter form in the API.
+- **Shared work, found by reading, not yet measured** (check these against a `fuel_report` before
+  claiming a saving). (5) The armor HUD's bindings (about forty formatted fields) used to be rebuilt
+  on every equipment change, so using an arrow or moving any item paid for them; now a
+  `crate::armor::Print` of what the four cells would show is compared first, and nothing is built
+  while the armor HUD is off (turning it on reads the equipment again). (6) The selected hotbar slot
+  was asked for separately by the bow-only arrow counter, the bow-aware mob hitboxes and scroll zoom;
+  `selected_slot()` in `guest.rs` reads it at most once a frame, a failed read included, and never
+  keeps it to the next frame. (7) The fullbright key check no longer copies the whole settings every
+  frame; only a press does. (8) A moved HUD element's save waits for a frame with the headroom and
+  no other heavy job, stays pending if the write fails (retried after five seconds), and the new
+  place shows at once. (9) The coordinates line (`fps_coords`) reads the player's feet position
+  with `player_state::read_world` at most ten times a second (`COORDS_NEXT`) and only while it is
+  on and in a world; the line is patched only when a block number changes. Its fuel is the `coords`
+  section (a call every frame, about one in six reading): unmeasured until a `fuel_report` has it.
 
 ## Checking what Cinnabar will accept
 

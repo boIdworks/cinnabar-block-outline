@@ -6,6 +6,26 @@ impl AutoCs {
     /// Advances one tick and returns the batches to send: to the client, then to the server.
     pub fn tick(&mut self) -> (Vec<u8>, Vec<u8>) {
         self.tick += 1;
+        if self.replay_reopen_at.is_some_and(|at| self.tick >= at) {
+            self.replay_reopen_at = None;
+            if let Some(json) = &self.replay_overview {
+                self.replay_form = Some((REPLAY_FORM, 0));
+                packets::form_request(&mut self.to_client, REPLAY_FORM, json);
+            }
+        }
+        if self.picker_reopen_at.is_some_and(|at| self.tick >= at) {
+            self.picker_reopen_at = None;
+            if self.run.stage == Stage::Picking {
+                self.show_picker();
+            }
+        }
+        if self.picker_cancel_until.is_some_and(|at| self.tick >= at) {
+            self.picker_cancel_until = None;
+            if self.run.stage == Stage::Picking {
+                self.reset();
+                self.say("Cancelled.");
+            }
+        }
         match self.run.stage {
             Stage::Party(until) if self.tick >= until => {
                 let party = self.run.party.trim().replace('\n', " | ");
@@ -96,5 +116,10 @@ impl AutoCs {
     /// Ends the current run; what lasts the session (invites, spectators, maps) stays.
     pub(super) fn reset(&mut self) {
         self.run = Run::default();
+        self.replay_overview = None;
+        self.replay_reopen_at = None;
+        self.replay_form = None;
+        self.picker_cancel_until = None;
+        self.picker_reopen_at = None;
     }
 }

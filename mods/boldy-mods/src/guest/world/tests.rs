@@ -376,3 +376,114 @@ fn a_merged_outline_is_the_same_every_time_it_is_asked_for() {
         "a different shape replaces the cached one"
     );
 }
+
+#[test]
+fn actors_in_range_counts_the_nearest_run_within_range() {
+    let eye = [0.0, 0.0, 0.0];
+    let at = |x: f32| (x, 0.0, 0.0);
+    // Nearest first: the first three are within 10 blocks, the fourth is not.
+    let list = [at(1.0), at(5.0), at(10.0), at(11.0), at(2.0)];
+    assert_eq!(actors_in_range(list.into_iter(), eye, 10.0), 3);
+    assert_eq!(actors_in_range([].into_iter(), eye, 10.0), 0);
+    // Distance counts in all three axes.
+    assert_eq!(actors_in_range([(6.0, 6.0, 6.0)].into_iter(), eye, 10.0), 0);
+    assert_eq!(actors_in_range([(5.0, 5.0, 5.0)].into_iter(), eye, 10.0), 1);
+}
+
+#[test]
+fn the_next_actor_ask_follows_what_was_in_range_with_a_few_to_spare() {
+    // Two of twelve in range: those, and the spare.
+    assert_eq!(next_actor_ask(2, 12, 12), 2 + ACTOR_SPARE as u32);
+    // None in range still asks for a few, so one coming near is seen.
+    assert_eq!(next_actor_ask(0, 12, 12), ACTOR_SPARE as u32);
+    // Every one read was in range: there may be more, so the most.
+    assert_eq!(next_actor_ask(12, 12, 12), 12);
+    assert_eq!(next_actor_ask(3, 3, 12), 12);
+    assert_eq!(next_actor_ask(0, 0, 12), 12);
+    // Never above the most, never below one.
+    assert_eq!(next_actor_ask(11, 12, 12), 12);
+    assert_eq!(next_actor_ask(usize::MAX - 1, usize::MAX, 12), 12);
+    assert!(next_actor_ask(0, 5, 1) >= 1);
+}
+
+#[test]
+fn arrows_are_separate_from_melee_targets_even_when_not_pickable() {
+    let mut arrow = player_state::Actor {
+        session: 1,
+        dimension: 0,
+        runtime_id: 42,
+        player: false,
+        position: (1.0, 2.0, 3.0),
+        name: String::new(),
+        identifier: "minecraft:arrow".into(),
+        yaw: 0.0,
+        pitch: 0.0,
+        pickable: false,
+        hittable: Some(false),
+        look_origin: None,
+        look_direction: None,
+        invisible: false,
+        sneaking: false,
+        hurt: false,
+        health: None,
+        boxes: vec![player_state::Bounds {
+            min: (1.0, 2.0, 3.0),
+            max: (1.5, 2.5, 3.5),
+        }],
+    };
+    assert_eq!(
+        projectile_boxes([&arrow].into_iter()),
+        vec![[[1.0, 2.0, 3.0, 1.5, 2.5, 3.5]]]
+    );
+    assert!(boxes_of([&arrow].into_iter(), &|_| false).0.is_empty());
+    arrow.pickable = true;
+    assert!(boxes_of([&arrow].into_iter(), &|_| false).0.is_empty());
+    arrow.invisible = true;
+    assert!(projectile_boxes([&arrow].into_iter()).is_empty());
+}
+
+#[test]
+fn arrow_shapes_use_their_own_colour_and_extended_range() {
+    let settings = Settings {
+        arrow_rgb: [12, 34, 56],
+        mob_on: true,
+        ..Settings::default()
+    };
+    let target = Target {
+        hit: None,
+        mobs: Vec::new(),
+        arrows: vec![[[30.0, 0.0, 0.0], [31.0, 1.0, 1.0]]],
+        dimension: 0,
+        camera: [0.0; 3],
+    };
+    let result = super::shapes(&target, &settings);
+    assert_eq!(result.len(), 1);
+    assert_eq!(&result[0].settings.rgba[..3], &[12, 34, 56]);
+    let actor = [[[30.0, 0.0, 0.0, 31.0, 1.0, 1.0]]];
+    assert_eq!(
+        outline::nearest_mob_boxes(&actor, [0.0; 3], None, ARROW_RANGE, MAX_MOB_BOXES).len(),
+        1
+    );
+    assert!(
+        outline::nearest_mob_boxes(&actor, [0.0; 3], None, MOB_RANGE, MAX_MOB_BOXES).is_empty()
+    );
+}
+
+#[test]
+fn bow_extends_only_players_and_returns_to_normal_when_put_away() {
+    let nearby_mob = [[4.0, 0.0, 0.0, 5.0, 1.0, 1.0]];
+    let distant_player = [[30.0, 0.0, 0.0, 31.0, 1.0, 1.0]];
+    let distant_mob = [[32.0, 0.0, 0.0, 33.0, 1.0, 1.0]];
+    let out_of_range_player = [[60.0, 0.0, 0.0, 61.0, 1.0, 1.0]];
+    let actors = [nearby_mob, distant_player, distant_mob, out_of_range_player];
+    let players = [false, true, false, true];
+    let normal = nearest_boxes(&actors, &players, [0.0; 3], None, false);
+    assert_eq!(normal.len(), 1);
+    let bow = nearest_boxes(&actors, &players, [0.0; 3], None, true);
+    assert_eq!(bow.len(), 2);
+    assert_eq!(bow[1][0], [30.0, 0.0, 0.0]);
+    assert_eq!(
+        nearest_boxes(&actors, &players, [0.0; 3], None, false),
+        normal
+    );
+}

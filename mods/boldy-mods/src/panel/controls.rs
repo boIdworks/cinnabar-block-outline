@@ -30,6 +30,10 @@ pub(super) enum View {
     MobTop,
     /// The Arrow counter page.
     Counter,
+    Armor,
+    VanillaHud,
+    /// The Hive Utilities page.
+    HiveUtilities,
     /// The CPS page.
     Cps,
     /// The FPS counter page.
@@ -270,6 +274,54 @@ fn home(t: &mut Table) {
     );
     t.add(
         View::Home,
+        [10.0, HOME_ARMOR_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Armor HUD options",
+        press("open_armor"),
+    );
+    t.add(
+        View::Home,
+        [HOME_SWITCH_X, HOME_ARMOR_Y, HOME_SWITCH_W, HOME_BUTTON_H],
+        "Show or hide the armor HUD",
+        Action::Toggle("home_armor"),
+    );
+    t.add(
+        View::Home,
+        [10.0, HOME_VANILLA_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Show or hide parts of the vanilla HUD",
+        press("open_vanilla"),
+    );
+    t.add(
+        View::Home,
+        [10.0, HOME_HIVE_Y, HOME_BUTTON_W, HOME_BUTTON_H],
+        "Auto queue for Hive games",
+        press("open_hive"),
+    );
+    t.add(
+        View::HiveUtilities,
+        row(HIVE_QUEUE_Y),
+        "Queues the next Hive game when one ends",
+        Action::Toggle("auto_queue"),
+    );
+    t.add(
+        View::VanillaHud,
+        row(COUNTER_ON_Y),
+        "Show or hide the hunger icons",
+        Action::Toggle("show_hunger"),
+    );
+    t.add(
+        View::VanillaHud,
+        row(VANILLA_EFFECTS_Y),
+        "Show or hide the effect timers",
+        Action::Toggle("effect_timers"),
+    );
+    t.add(
+        View::VanillaHud,
+        row(VANILLA_HOTBAR_Y),
+        "Show or hide the hotbar key labels",
+        Action::Toggle("hotbar_keys"),
+    );
+    t.add(
+        View::Home,
         row(HOME_KEY_Y),
         "Click, press a key; Esc cancels",
         Action::Key("menu_key"),
@@ -299,15 +351,31 @@ fn block_and_mob(t: &mut Table) {
     );
     t.add(
         View::MobTop,
-        half(EDIT_Y),
+        [10.0, EDIT_Y, (SETTINGS_W - 28.0) / 3.0, BUTTON_H],
         "Hitbox colour; the fill uses it too",
         press("edit_line"),
     );
     t.add(
         View::MobTop,
-        half_right(EDIT_Y),
+        [
+            10.0 + (SETTINGS_W - 28.0) / 3.0 + 4.0,
+            EDIT_Y,
+            (SETTINGS_W - 28.0) / 3.0,
+            BUTTON_H,
+        ],
         "Colour of the mob you aim at",
         press("edit_aim"),
+    );
+    t.add(
+        View::MobTop,
+        [
+            10.0 + 2.0 * ((SETTINGS_W - 28.0) / 3.0 + 4.0),
+            EDIT_Y,
+            (SETTINGS_W - 28.0) / 3.0,
+            BUTTON_H,
+        ],
+        "Arrow hitbox colour",
+        press("edit_arrow"),
     );
 
     // Their settings view: opacity, thickness and fill rows, then the options.
@@ -475,6 +543,59 @@ fn block_and_mob(t: &mut Table) {
 
 /// The Arrow counter page.
 fn counter(t: &mut Table) {
+    // Armor HUD options share this page with the arrow counter.
+    t.add(
+        View::Armor,
+        row(ARMOR_HORIZONTAL_Y),
+        "Arrange armor side by side",
+        Action::Toggle("armor_horizontal"),
+    );
+    t.add(
+        View::Armor,
+        row(ARMOR_PERCENT_Y),
+        "Show remaining durability",
+        Action::Toggle("armor_percent"),
+    );
+    t.add(
+        View::Armor,
+        row(ARMOR_BACKGROUND_Y),
+        "Show a hotbar-style slot behind each item",
+        Action::Toggle("armor_background"),
+    );
+    t.add(
+        View::Armor,
+        row(ARMOR_MOVE_Y),
+        "Drag armor HUD to move it",
+        press("armor_move"),
+    );
+    t.add(
+        View::Armor,
+        value_area(ARMOR_SIZE_Y),
+        "Click to reset armor size",
+        Action::Help,
+    );
+    t.add(
+        View::Armor,
+        pair_area(ARMOR_SIZE_Y),
+        "10%% smaller or bigger",
+        Action::Help,
+    );
+    t.add(
+        View::Armor,
+        row(ARMOR_SIZE_Y),
+        STEPPER_TIP,
+        Action::Stepper {
+            value: "armor_size",
+            less: "armor_size_less",
+            more: "armor_size_more",
+        },
+    );
+    t.add(
+        View::Armor,
+        row(ARMOR_RESET_Y),
+        "Reset armor position and size; click twice",
+        press("armor_reset"),
+    );
     // The Arrow counter page.
     t.add(
         View::Counter,
@@ -584,6 +705,12 @@ fn cps(t: &mut Table) {
         row(FPS_ON_Y),
         "Shows or hides the frames per second",
         Action::Toggle("fps_on"),
+    );
+    t.add(
+        View::Fps,
+        row(FPS_COORDS_Y),
+        "Shows your block position under the FPS",
+        Action::Toggle("fps_coords"),
     );
     t.add(
         View::Fps,

@@ -9,5 +9,6 @@
   "entities": true,
   "fullbright": true,
   "player_state": true,
-  "camera": true
+  "camera": true,
+  "commands": ["q", "p"]
 }

@@ -150,10 +150,12 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         "edit_line",
         if matching && !mob {
             "Line & fill colour"
+        } else if mob {
+            "Mobs"
         } else {
             "Line colour"
         },
-        state.colour_open && !state.editing_fill && !state.editing_aim,
+        state.colour_open && !state.editing_fill && !state.editing_aim && !state.editing_arrow,
     );
     toggle(
         out,
@@ -164,8 +166,14 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     toggle(
         out,
         "edit_aim",
-        "Aimed colour",
+        "Aimed",
         state.colour_open && state.editing_aim,
+    );
+    toggle(
+        out,
+        "edit_arrow",
+        "Arrow",
+        state.colour_open && state.editing_arrow,
     );
     toggle(
         out,
@@ -193,6 +201,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("counter_reset", Reset::Counter, "Reset place and size"),
         ("cps_reset", Reset::Cps, "Reset place and size"),
         ("fps_reset", Reset::Fps, "Reset place and size"),
+        ("armor_reset", Reset::Armor, "Reset place and size"),
         ("zoom_reset", Reset::Zoom, "Reset zoom"),
         ("crosshair_reset", Reset::Crosshair, "Reset crosshair"),
         ("crosshair_clear", Reset::Drawing, "Clear drawing"),
@@ -218,6 +227,32 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         },
         settings.show_all_mobs,
     );
+    toggle(
+        out,
+        "armor_horizontal",
+        "Horizontal layout",
+        settings.armor.horizontal,
+    );
+    toggle(
+        out,
+        "armor_percent",
+        "Show durability %",
+        settings.armor.percent,
+    );
+    toggle(
+        out,
+        "armor_background",
+        "Slot background",
+        settings.armor.background,
+    );
+    toggle(out, "show_hunger", "Show hunger", !settings.hide_hunger);
+    toggle(
+        out,
+        "effect_timers",
+        "Effect timers",
+        settings.effect_timers,
+    );
+    toggle(out, "hotbar_keys", "Hotbar keys", settings.hotbar_keys);
     let counter = settings.counter;
     toggle(
         out,
@@ -277,10 +312,37 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         if fps.on { "FPS: On" } else { "FPS: Off" },
         fps.on,
     );
+    toggle(
+        out,
+        "fps_coords",
+        if fps.coords {
+            "Coordinates: On"
+        } else {
+            "Coordinates: Off"
+        },
+        fps.coords,
+    );
+    toggle(
+        out,
+        "auto_queue",
+        if settings.auto_queue {
+            "Auto queue: On"
+        } else {
+            "Auto queue: Off"
+        },
+        settings.auto_queue,
+    );
     let mut size = String::from("Size: ");
     digits(&mut size, (fps.scale * 100.0).round().max(0.0) as u64);
     size.push_str("%%");
     toggle(out, "fps_size", &size, false);
+    let mut armor_size = String::from("Size: ");
+    digits(
+        &mut armor_size,
+        (settings.armor.scale * 100.0).round().max(0.0) as u64,
+    );
+    armor_size.push_str("%%");
+    toggle(out, "armor_size", &armor_size, false);
     let jump = settings.jump_reset;
     toggle(
         out,
@@ -435,6 +497,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         ("counter_size", counter.scale != 1.0),
         ("cps_size", cps.scale != 1.0),
         ("fps_size", fps.scale != 1.0),
+        ("armor_size", settings.armor.scale != 1.0),
         (
             "jump_window",
             jump.window != crate::jumpreset::DEFAULT_WINDOW,
@@ -446,6 +509,9 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         out.push_str(if changed { "reset" } else { "" });
         out.push_str("\",");
     }
+    out.push_str(
+        r##""#open_armor_color":[0.7,0.8,0.9,1],"#open_vanilla_color":[0.55,0.9,0.6,1],"#open_hive_color":[1,0.78,0.25,1],"##,
+    );
     out.push_str(r##""#open_zoom_color":[0.5,0.85,1,1],"##);
     out.push_str(r##""#counter_size_text":"Size: "##);
     digits(out, (counter.scale * 100.0).round().max(0.0) as u64);
@@ -462,6 +528,7 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
     toggle(out, "home_block", "", settings.block_on);
     toggle(out, "home_mob", "", settings.mob_on);
     toggle(out, "home_counter", "", counter.on);
+    toggle(out, "home_armor", "", settings.armor.on);
     toggle(out, "home_cps", "", cps.on);
     toggle(out, "home_fps", "", fps.on);
     toggle(out, "home_zoom", "", zoom.on);
@@ -477,6 +544,9 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         Page::Block => "Block outline",
         Page::Mob => "Mob hitbox",
         Page::Counter => "Arrow counter",
+        Page::Armor => "Armor HUD",
+        Page::VanillaHud => "Vanilla HUD",
+        Page::HiveUtilities => "Hive Utilities",
         Page::Cps => "CPS counter",
         Page::Fps => "FPS counter",
         Page::Zoom => "Zoom",
@@ -494,11 +564,15 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         } else {
             "Block"
         });
-        out.push_str(match (state.editing_aim, state.editing_fill) {
-            (true, _) => " > Aimed colour",
-            (false, true) => " > Fill colour",
-            (false, false) => " > Line colour",
-        });
+        if state.editing_arrow {
+            out.push_str(" > Arrow colour");
+        } else {
+            out.push_str(match (state.editing_aim, state.editing_fill) {
+                (true, _) => " > Aimed colour",
+                (false, true) => " > Fill colour",
+                (false, false) => " > Line colour",
+            });
+        }
     } else {
         out.push_str(page);
     }
@@ -526,6 +600,9 @@ pub(super) fn bindings_into(out: &mut String, settings: &Settings, seconds: f32,
         state.page == Page::Mob && !state.colour_open,
     );
     flag(out, "counter_page_visible", state.page == Page::Counter);
+    flag(out, "armor_page_visible", state.page == Page::Armor);
+    flag(out, "vanilla_page_visible", state.page == Page::VanillaHud);
+    flag(out, "hive_page_visible", state.page == Page::HiveUtilities);
     flag(out, "cps_page_visible", state.page == Page::Cps);
     flag(out, "fps_page_visible", state.page == Page::Fps);
     flag(out, "zoom_page_visible", state.page == Page::Zoom);

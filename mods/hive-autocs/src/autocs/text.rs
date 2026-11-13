@@ -80,6 +80,15 @@ pub(crate) fn is_chatter(plain: &str) -> bool {
         || role_set(plain).is_some()
 }
 
+/// Whether `plain` (formatting removed) is Hive's end-of-game line, `» Game OVER!`. Whatever
+/// symbol Hive puts in front of it does not matter.
+pub(crate) fn is_game_over(plain: &str) -> bool {
+    plain
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim()
+        .eq_ignore_ascii_case("Game OVER!")
+}
+
 /// The player's name at the end of the text before " joined." or " left." ("» Name").
 pub(crate) fn player_name(before: &str) -> &str {
     before.rsplit("» ").next().unwrap_or(before).trim()

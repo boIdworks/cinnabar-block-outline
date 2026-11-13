@@ -40,7 +40,12 @@ const LABEL_SECONDS: f32 = 5.0;
 const HOVER_SECONDS: f32 = 0.5;
 /// Each nearby actor's box (as `[min, max]` per axis) and whether Cinnabar says its crosshair
 /// would hit it (`None`: unknown).
-type Observed = (Vec<outline::ActorBox>, Vec<Option<bool>>);
+type Observed = (
+    Vec<outline::ActorBox>,
+    Vec<Option<bool>>,
+    Vec<outline::ActorBox>,
+    Vec<bool>,
+);
 /// A hover lookup: its inputs, the pointer on the card and the control under it.
 type HoverLookup = (
     (Option<(f32, f32)>, MenuState, bool),
@@ -51,12 +56,15 @@ type HoverLookup = (
 mod fuel;
 mod hud_elements;
 mod menu;
+mod queue;
 mod world;
 use fuel::*;
 use hud_elements::{
-    arrow_counter, cps_frame, crosshair_frame, draw_grid_frame, fps_frame, jump_reset_frame,
+    arrow_counter, cps_frame, crosshair_frame, draw_grid_frame, effects_frame, fps_frame,
+    hotbar_frame, jump_reset_frame, refresh_quiver,
 };
 use menu::*;
+use queue::{new_frame, note_read, note_session, queue_frame};
 use world::*;
 
 /// A copy of all the settings. That is nearly 400 bytes, a few hundred fuel to copy, so code that
@@ -68,6 +76,15 @@ fn settings() -> Settings {
 /// Replaces the settings.
 fn set_settings(settings: Settings) {
     SETTINGS.with(|current| *current.borrow_mut() = settings);
+    SETTINGS_REV.with(|rev| rev.set(rev.get().wrapping_add(1)));
+}
+
+thread_local! {
+    /// Counts the times the settings were replaced, so a frame can tell they are as it last saw them
+    /// without comparing them (the crosshair's drawing is over 500 bytes).
+    static SETTINGS_REV: StdCell<u32> = const { StdCell::new(0) };
+    /// The settings revision and HUD size at which the crosshair's plan was last known to match.
+    static CROSSHAIR_CHECKED: StdCell<Option<(u32, [f32; 3])>> = const { StdCell::new(None) };
 }
 
 /// Reads from the settings in place, copying only what `read` returns.
@@ -86,7 +103,7 @@ type CpsKey = (
 
 /// A changed set of bindings being read: its revision, the next offset, and the attack keys and
 /// jump keys found so far.
-type BindingsRead = (u64, u32, Vec<String>, Vec<String>);
+type BindingsRead = (u64, u32, Vec<String>, Vec<String>, [Option<String>; 9]);
 
 /// What the HUD layer has of a crosshair or the drawing grid: the header's hash (none sent
 /// yet) and each part's (none: still empty, as the layer starts).
@@ -125,7 +142,7 @@ thread_local! {
     /// When to next try uploading the cube while it is missing, in accumulated seconds.
     static UPLOAD_RETRY_AT: StdCell<f32> = const { StdCell::new(0.0) };
     /// Unsaved menu state: key capture and whether the colour tools edit the fill.
-    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, capturing_zoom: false, editing_fill: false, editing_aim: false, page: panel::Page::Home, colour_open: false, typing: None, confirm: panel::Reset::None, focus: None, moving: false, moving_cps: false, moving_fps: false, guide_bottom: false, fuel_k: [0, 0], drawing: false, draw_full: false }) };
+    static MENU: StdCell<MenuState> = const { StdCell::new(MenuState { capturing: false, capturing_fullbright: false, capturing_zoom: false, editing_fill: false, editing_aim: false, editing_arrow: false, page: panel::Page::Home, colour_open: false, typing: None, confirm: panel::Reset::None, focus: None, moving: false, moving_cps: false, moving_fps: false, moving_armor: false, guide_bottom: false, fuel_k: [0, 0, 0], drawing: false, draw_full: false }) };
     /// The player's attack keys (`MouseLeft` until read) and the bindings revision they came
     /// from, re-read every `BINDINGS_SECONDS`.
     static ATTACK_KEYS: RefCell<(Option<u64>, Vec<String>)> = const { RefCell::new((None, Vec::new())) };
@@ -168,7 +185,7 @@ thread_local! {
     /// Fuel the last changed terrain region cost per block; unknown until one is read.
     static READ_COST: StdCell<Option<f64>> = const { StdCell::new(None) };
     /// The last actors read, reused by frames with too little fuel left to read them.
-    static LAST_ACTORS: RefCell<Observed> = const { RefCell::new((Vec::new(), Vec::new())) };
+    static LAST_ACTORS: RefCell<Observed> = const { RefCell::new((Vec::new(), Vec::new(), Vec::new(), Vec::new())) };
     /// This frame already did a costly job (a menu patch or a geometry upload), so a changed
     /// terrain region, the other costly job, waits for the next frame.
     static HEAVY_FRAME: StdCell<bool> = const { StdCell::new(false) };
@@ -219,14 +236,14 @@ thread_local! {
     /// What the CPS readout was last worked out from.
     static CPS_KEY: StdCell<Option<CpsKey>> = const { StdCell::new(None) };
     /// The CPS text's measured pieces, measured again when the GUI scale changes.
-    static CPS_WIDTHS: StdCell<Option<cps::Widths>> = const { StdCell::new(None) };
+    static CPS_WIDTHS: StdCell<cps::WidthProbe> = const { StdCell::new(cps::WidthProbe::new()) };
     /// Counts frames for the FPS counter.
     static FPS: StdCell<fps::Meter> = const { StdCell::new(fps::Meter::new()) };
     /// What the FPS counter last showed, so it is only patched when something changes.
     static FPS_SHOWN: StdCell<Option<fps::View>> = const { StdCell::new(None) };
-    /// The most fuel any frame has used since the mod started, and when the start page's fuel
-    /// line was last refreshed.
-    static FUEL_PEAK: StdCell<u64> = const { StdCell::new(0) };
+    /// What whole frames have cost (see [`FrameFuel`]), and when the start page's fuel line was
+    /// last refreshed.
+    static FRAME_FUEL: StdCell<FrameFuel> = const { StdCell::new(FrameFuel::new()) };
     /// The fuel each feature has used (see `SECTIONS`), and when it was last saved.
     static FUEL_STATS: RefCell<[Stat; SECTIONS.len()]> =
         const { RefCell::new([Stat { sum: 0, max: 0, calls: 0 }; SECTIONS.len()]) };
@@ -276,6 +293,8 @@ thread_local! {
 /// Mob hitboxes outlined around the player: within this many blocks of the eye, nearest first,
 /// and at most `MAX_MOB_BOXES`, which keeps a crowd inside the frame's fuel.
 const MOB_RANGE: f64 = 12.0;
+/// Arrow outlines extend farther than mob hitboxes.
+const ARROW_RANGE: f64 = 48.0;
 /// Fuel kept back after a terrain read for the rest of the frame (actors and drawing).
 const READ_RESERVE: f64 = 70_000.0;
 /// Fuel a frame needs left to read the nearby actors; with less, the last ones are reused.
@@ -285,8 +304,24 @@ const DRAW_RESERVE: u64 = 25_000;
 /// About what sending one line instance costs.
 const SEND_FUEL: u64 = 400;
 const MAX_MOB_BOXES: usize = 8;
-/// How many of the nearest actors are read each frame (the host allows 16).
+/// The most of the nearest actors read in a frame (the host allows 16); a quiet scene reads fewer,
+/// see [`next_actor_ask`].
 const ACTOR_LIMIT: u32 = 12;
+/// Actors read beyond those in range, and blocks of range beyond `MOB_RANGE` or the reach, so an
+/// actor coming into range is already in the next read.
+const ACTOR_SPARE: usize = 3;
+const ACTOR_RANGE_SPARE: f64 = 4.0;
+
+thread_local! {
+    /// How many actors the next read asks for. Starts at the most, then follows what was in range.
+    static ACTOR_ASK: StdCell<u32> = const { StdCell::new(ACTOR_LIMIT) };
+}
+
+thread_local! {
+    static VANILLA_HUNGER_HIDDEN: StdCell<bool> = const { StdCell::new(false) };
+    static HOTBAR_KEYS: RefCell<(Option<u64>, [Option<String>; 9])> = RefCell::new((None, std::array::from_fn(|_| None)));
+    static HOTBAR_SHOWN: StdCell<Option<(u64, bool)>> = const { StdCell::new(None) };
+}
 
 /// One box to draw and how.
 #[derive(Clone, Copy)]
@@ -303,6 +338,12 @@ struct Shape {
 }
 
 impl Shape {
+    /// Whether this is drawn as the wire cube, one instance for the whole box: a mob's single box.
+    /// A block keeps its lines, which follow its shape and show only the side facing the camera.
+    fn wireframe(&self) -> bool {
+        !self.block && self.boxes.as_slice().len() == 1
+    }
+
     fn same_box(&self, other: &Shape) -> bool {
         let close = |a: [f64; 3], b: [f64; 3]| (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-6);
         close(self.min, other.min) && close(self.max, other.max)
@@ -315,6 +356,7 @@ struct Target {
     hit: Option<(Hit, bool)>,
     /// Other nearby mob hitboxes as `[min, max]`, while every nearby mob is outlined.
     mobs: Vec<[[f64; 3]; 2]>,
+    arrows: Vec<[[f64; 3]; 2]>,
     dimension: i32,
     /// The rendered camera, which differs from the eye in third person.
     camera: [f64; 3],
@@ -359,9 +401,14 @@ impl Guest for BlockOutline {
 
     fn frame() {
         HUD_WRITES.with(|writes| writes.set(0));
+        SELECTED_SLOT.with(|slot| slot.set(None));
+        new_frame();
         let start = budget::remaining_fuel();
         FRAME_START.with(|at| at.set(start));
         frame_body();
+        // Last, so it knows how many player-state reads the frame has used (the host traps a
+        // callback that makes more than eight) and takes at most one of what is left.
+        timed(S_QUEUE, queue_frame);
         note_fuel(start);
     }
 }
@@ -369,6 +416,29 @@ impl Guest for BlockOutline {
 thread_local! {
     /// The fuel this callback started with: what [`headroom`] counts the frame's spending from.
     static FRAME_START: StdCell<u64> = const { StdCell::new(0) };
+}
+
+thread_local! {
+    /// The selected hotbar slot as `(session, dimension, slot)`, read at most once a frame: `None`
+    /// until the first reader asks, then what the host said (`Some(None)` for a refusal or no
+    /// selection, so a failed read is not repeated either). Cleared at the start of every frame.
+    static SELECTED_SLOT: StdCell<Option<Option<(u64, i32, u8)>>> = const { StdCell::new(None) };
+}
+
+/// The selected hotbar slot as `(session, dimension, slot)`. The first caller in a frame asks the
+/// host; the others share its answer. Callers check the session and dimension themselves where
+/// they need to.
+fn selected_slot() -> Option<(u64, i32, u8)> {
+    if let Some(read) = SELECTED_SLOT.with(StdCell::get) {
+        return read;
+    }
+    note_read();
+    let read = player_state::read_selected_slot()
+        .ok()
+        .flatten()
+        .map(|selected| (selected.session, selected.dimension, selected.slot));
+    SELECTED_SLOT.with(|slot| slot.set(Some(read)));
+    read
 }
 
 thread_local! {
@@ -434,6 +504,7 @@ fn frame_body() {
     // Like Simple Fullbright, ask for fullbright first thing in every frame: the host keeps
     // it only while callbacks succeed, so a request each frame keeps it on.
     let session = frame.as_ref().map_or(0, |frame| frame.session);
+    note_session(session);
     timed(S_FULLBRIGHT, || {
         apply_fullbright(settings_with(|s| s.fullbright), session);
     });
@@ -514,36 +585,50 @@ fn frame_body() {
             .map(|v| [v.width, v.height, v.scale])
     });
     timed(S_ARROW, || {
+        if !HEAVY_FRAME.with(StdCell::get)
+            && settings_with(|s| s.counter.on || s.armor.on || s.mob_on)
+        {
+            refresh_quiver();
+        }
         arrow_counter(controls.as_ref(), seconds, hud_size)
     });
     // Before the other HUD elements, which cost little: a changed crosshair or drawing grid is
     // the costliest patch, and needs the most fuel left.
     timed(S_CROSSHAIR, || {
-        draw_grid_frame(controls.as_ref());
+        timed(S_XH_GRID, || draw_grid_frame(controls.as_ref()));
         crosshair_frame(controls.as_ref(), hud_size);
     });
     timed(S_CPS, || {
         cps_frame(controls.as_ref(), seconds, hud_size);
-        fps_frame(seconds, hud_size);
+        fps_frame(seconds, hud_size, session != 0);
+        timed(S_HOTBAR, || hotbar_frame(seconds, session != 0));
     });
+    timed(S_EFFECTS, || effects_frame(seconds, session != 0));
     timed(S_JUMP, || {
         jump_reset_frame(controls.as_ref(), delta, seconds, session);
     });
     timed(S_ZOOM, || zoom_frame(controls.as_ref(), delta));
-    let settings = settings();
-    if menu_open
-        && (settings.rainbow || settings.mob.rainbow)
-        && seconds - PREVIEW_AT.with(StdCell::get) >= PREVIEW_SECONDS
-    {
+    // Only the few fields the frame reads, in place: a whole copy of the settings is a few hundred
+    // fuel, every frame.
+    let (rainbow, block_on, mob_on, reach, show_all_mobs) = settings_with(|s| {
+        (
+            s.rainbow || s.mob.rainbow,
+            s.block_on,
+            s.mob_on,
+            s.reach,
+            s.show_all_mobs,
+        )
+    });
+    if menu_open && rainbow && seconds - PREVIEW_AT.with(StdCell::get) >= PREVIEW_SECONDS {
         PREVIEW_AT.with(|at| at.set(seconds));
         let state = MENU.with(StdCell::get);
-        let _ = host_panel::update_content(&panel::preview_update(&settings, seconds, state));
+        let _ = host_panel::update_content(&panel::preview_update(&settings(), seconds, state));
     }
 
     // Nothing is drawn with the HUD hidden (F1) or with both outlines switched off, so skip the
     // terrain and crowd reads that would only feed a drawing that never happens. (An open menu
     // previews the outline, so it counts as showing, but not with both outlines off.)
-    if !(settings.block_on || settings.mob_on) || (!menu_open && timed(S_HIDDEN, hud_hidden)) {
+    if !(block_on || mob_on) || (!menu_open && timed(S_HIDDEN, hud_hidden)) {
         return;
     }
 
@@ -558,13 +643,32 @@ fn frame_body() {
         let dir = outline::look_direction(frame.yaw, frame.pitch);
         if !HEAVY_FRAME.with(StdCell::get) {
             timed(S_TERRAIN, || {
-                refresh_terrain(eye, dir, settings.reach, frame.session);
+                refresh_terrain(eye, dir, reach, frame.session);
             });
         }
         // Reading a crowd (up to 16 players on a server hub) costs a fair share of a
         // frame; after a costly terrain read, the last frame's actors do.
-        let (actors, hittable) = if headroom() >= ACTOR_RESERVE {
-            timed(S_ACTORS, || nearby_actor_boxes(eye))
+        let bow_held = mob_on
+            && show_all_mobs
+            && QUIVER
+                .with(StdCell::get)
+                .is_some_and(|(quiver_session, _, quiver)| {
+                    if quiver_session != frame.session {
+                        return false;
+                    }
+                    let selected = if quiver.bow_slots != 0 {
+                        selected_slot()
+                            .filter(|&(session, dimension, _)| {
+                                session == frame.session && dimension == frame.dimension
+                            })
+                            .map(|(_, _, slot)| slot)
+                    } else {
+                        None
+                    };
+                    quiver.holding_bow(selected)
+                });
+        let (actors, hittable, arrows, players) = if headroom() >= ACTOR_RESERVE {
+            timed(S_ACTORS, || nearby_actor_boxes(eye, reach))
         } else {
             LAST_ACTORS.with(|last| std::mem::take(&mut *last.borrow_mut()))
         };
@@ -577,11 +681,11 @@ fn frame_body() {
                 frame.session,
                 frame.dimension,
                 [eye, dir],
-                settings.reach,
+                reach,
                 native_aim.then(|| aimed.map(|index| actors[index].as_slice())),
                 &actors,
             )
-            .or_else(|| last_block_while_loading(eye, dir, settings.reach, frame.dimension))
+            .or_else(|| last_block_while_loading(eye, dir, reach, frame.dimension))
         });
         let camera = timed(S_CAMERA, gameplay::read_camera)
             .ok()
@@ -593,24 +697,36 @@ fn frame_body() {
                     f64::from(pose.position.z),
                 ]
             });
-        let mobs = if settings.show_all_mobs {
+        let mobs = if show_all_mobs {
             // In first person the camera is at the eye, so what is behind it is not on screen;
             // in third person it sits elsewhere, and nothing is left out.
             let first_person = (0..3).all(|axis| (camera[axis] - eye[axis]).abs() < 0.05);
             timed(S_BOXES, || {
-                nearest_boxes(&actors, eye, first_person.then_some(dir))
+                nearest_boxes(
+                    &actors,
+                    &players,
+                    eye,
+                    first_person.then_some(dir),
+                    bow_held,
+                )
             })
+        } else {
+            Vec::new()
+        };
+        let arrows_drawn = if mob_on {
+            outline::nearest_mob_boxes(&arrows, eye, None, ARROW_RANGE, MAX_MOB_BOXES)
         } else {
             Vec::new()
         };
         // Kept for a frame with too little fuel to read them again (moved, not copied).
         timed(S_KEEP, || {
-            LAST_ACTORS.with(|last| *last.borrow_mut() = (actors, hittable));
+            LAST_ACTORS.with(|last| *last.borrow_mut() = (actors, hittable, arrows, players));
         });
         LAST_HIT.with(|last| {
             *last.borrow_mut() = Some(Target {
                 hit,
                 mobs,
+                arrows: arrows_drawn,
                 dimension: frame.dimension,
                 camera,
             });
@@ -621,7 +737,7 @@ fn frame_body() {
     }
     LAST_HIT.with(|last| {
         if let Some(target) = last.borrow().as_ref() {
-            let shapes = timed(S_SHAPES, || shapes(target, &settings));
+            let shapes = timed(S_SHAPES, || settings_with(|s| shapes(target, s)));
             if !shapes.is_empty() {
                 timed(S_DRAW, || {
                     draw_outlines(&shapes, target.dimension, target.camera, seconds, mining);
@@ -640,7 +756,7 @@ const CUBE_RESERVE: u64 = 70_000;
 /// geometry is uploaded. Each of them takes a frame to itself, the menu patch the one after.
 fn startup_done() -> bool {
     HUD_PUBLISHED.with(StdCell::get)
-        && CUBE.with(|cube| cube.borrow().len() == outline::EDGES.len())
+        && CUBE.with(|cube| cube.borrow().len() == outline::CUBE_PIECES)
 }
 
 /// Fuel a painting frame keeps for itself beyond finding the drawing's rectangles.
@@ -796,11 +912,7 @@ fn zoom_frame(controls: Option<&input::Controls>, delta: f32) {
 /// The scroll notches since the last frame while zooming, positive zooming in, from the
 /// selected hotbar slot moving: a mod cannot read the wheel itself during gameplay.
 fn scroll_from_hotbar(controls: &input::Controls) -> i32 {
-    let Some(now) = player_state::read_selected_slot()
-        .ok()
-        .flatten()
-        .map(|selected| selected.slot)
-    else {
+    let Some(now) = selected_slot().map(|(_, _, slot)| slot) else {
         return 0;
     };
     let last = ZOOM_SLOT.with(|slot| slot.replace(Some(now)));
@@ -850,18 +962,19 @@ fn reserve_keys(settings: &Settings) {
 
 /// Switches fullbright when its key is pressed in game or with the menu open, with a message.
 fn toggle_fullbright_by_key(controls: &input::Controls) {
-    let mut settings = settings();
-    let Some(key) = settings.fullbright_key else {
-        return;
-    };
-    if !controls.focused
-        || !controls
-            .keys_pressed
-            .iter()
-            .any(|pressed| pressed == key.as_str())
-    {
+    // Nearly every frame nothing is pressed: look at the key in place, and copy the whole
+    // settings only for the press that changes them.
+    let pressed = controls.focused
+        && !controls.keys_pressed.is_empty()
+        && settings_with(|s| {
+            s.fullbright_key
+                .as_ref()
+                .is_some_and(|key| controls.keys_pressed.iter().any(|p| p == key.as_str()))
+        });
+    if !pressed {
         return;
     }
+    let mut settings = settings();
     settings.fullbright = !settings.fullbright;
     set_settings(settings);
     save_settings(&settings);
@@ -883,12 +996,16 @@ const BINDINGS_SECONDS: f32 = 2.0;
 fn refresh_attack_keys(seconds: f32) {
     let limit = mod_api::MAX_INPUT_BINDINGS_PER_READ as u32;
     let pending = BINDINGS_READ.with(|read| read.borrow_mut().take());
-    let (revision, offset, mut keys, mut jump, page) = match pending {
-        Some((revision, offset, keys, jump)) => match input::read_bindings(None, offset, limit) {
-            Ok(Some(page)) if page.revision == revision => (revision, offset, keys, jump, page),
-            // Changed or unreadable mid-read: start again at the next check.
-            _ => return,
-        },
+    let (revision, offset, mut keys, mut jump, mut hotbar, page) = match pending {
+        Some((revision, offset, keys, jump, hotbar)) => {
+            match input::read_bindings(None, offset, limit) {
+                Ok(Some(page)) if page.revision == revision => {
+                    (revision, offset, keys, jump, hotbar, page)
+                }
+                // Changed or unreadable mid-read: start again at the next check.
+                _ => return,
+            }
+        }
         None => {
             if seconds < BINDINGS_CHECK_AT.with(StdCell::get) {
                 return;
@@ -898,7 +1015,14 @@ fn refresh_attack_keys(seconds: f32) {
             let Ok(Some(page)) = input::read_bindings(known, 0, limit) else {
                 return;
             };
-            (page.revision, 0, Vec::new(), Vec::new(), page)
+            (
+                page.revision,
+                0,
+                Vec::new(),
+                Vec::new(),
+                std::array::from_fn(|_| None),
+                page,
+            )
         }
     };
     let next = offset + page.entries.len() as u32;
@@ -910,14 +1034,30 @@ fn refresh_attack_keys(seconds: f32) {
         match binding.action.as_str() {
             "attack" => keys.push(binding.key),
             "jump" => jump.push(binding.key),
+            action if action.starts_with("hotbar-") => {
+                if let Ok(number) = action[7..].parse::<usize>()
+                    && (1..=9).contains(&number)
+                    && hotbar[number - 1].is_none()
+                {
+                    let m = binding.modifiers;
+                    hotbar[number - 1] = Some(crate::hotbar::key_label(
+                        &binding.key,
+                        m.shift,
+                        m.control,
+                        m.alt,
+                        m.super_key,
+                    ));
+                }
+            }
             _ => {}
         }
     }
     if next < total && next > offset {
-        BINDINGS_READ.with(|read| *read.borrow_mut() = Some((revision, next, keys, jump)));
+        BINDINGS_READ.with(|read| *read.borrow_mut() = Some((revision, next, keys, jump, hotbar)));
     } else {
         ATTACK_KEYS.with(|stored| *stored.borrow_mut() = (Some(revision), keys));
         JUMP_KEYS.with(|stored| *stored.borrow_mut() = jump);
+        HOTBAR_KEYS.with(|stored| *stored.borrow_mut() = (Some(revision), hotbar));
     }
 }
 
@@ -930,11 +1070,12 @@ fn hud_hidden() -> bool {
 }
 
 /// Whether the game would draw its own crosshair now, hidden by this mod or not: not with the
-/// HUD hidden (F1), in third person or on the death screen. The custom crosshair follows it, so
-/// it is checked more often than [`hud_hidden`], ten times a second. Without the HUD
-/// permission it counts as shown.
+/// HUD hidden (F1), in third person or on the death screen. The custom crosshair follows it, at
+/// the same five times a second as [`hud_hidden`], so the two share one read: at ten reads a
+/// second the read (about 30,000 fuel, the reply lists every HUD element by name) was most of the
+/// crosshair's cost. Without the HUD permission it counts as shown.
 fn vanilla_crosshair_shown() -> bool {
-    hud_elements_read(0.1).1
+    hud_elements_read(0.2).1
 }
 
 /// The game's HUD elements, read again once the last read is `max_age` seconds old: whether

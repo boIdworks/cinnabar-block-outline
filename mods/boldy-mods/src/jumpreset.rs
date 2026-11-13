@@ -57,7 +57,7 @@ pub struct JumpReset {
 impl Default for JumpReset {
     fn default() -> Self {
         Self {
-            on: true,
+            on: false,
             window: DEFAULT_WINDOW,
             knockback: DEFAULT_KNOCKBACK,
             log: Log::new(),

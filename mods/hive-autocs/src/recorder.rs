@@ -119,6 +119,7 @@ impl Recorder {
                 | packets::DDUI_RELOAD
                 | packets::DDUI_SCREEN_CLOSED,
             ) => self.raw(side, packet),
+            (Way::FromServer, packets::MOB_EFFECT) => self.raw(side, packet),
             _ => {}
         }
     }

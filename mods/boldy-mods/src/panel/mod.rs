@@ -47,6 +47,7 @@ pub struct MenuState {
     pub editing_fill: bool,
     /// Whether the colour tools edit the aimed mob's colour (Mob hitbox page).
     pub editing_aim: bool,
+    pub editing_arrow: bool,
     /// The page shown: the start page, or the Block outline or Mob hitbox settings.
     pub page: Page,
     /// Whether the colour tools are shown, after clicking Line colour or Fill colour.
@@ -66,11 +67,12 @@ pub struct MenuState {
     pub moving_cps: bool,
     /// The same for the FPS counter; it wins over `moving_cps` when both are set.
     pub moving_fps: bool,
+    pub moving_armor: bool,
     /// The moving guide sits at the bottom of the screen, because the counter is near the top.
     pub guide_bottom: bool,
-    /// Fuel the last frame used and the busiest frame used, in thousands (of 200): shown at the
-    /// foot of the start page.
-    pub fuel_k: [u16; 2],
+    /// Fuel a frame uses on average, the busiest recent frame and the busiest ever, in thousands
+    /// (of 200): shown at the foot of the start page.
+    pub fuel_k: [u16; 3],
     /// The Crosshair page shows its drawing grid in place of its settings.
     pub drawing: bool,
     /// The last pixel drawn was refused because the drawing would be too detailed to send.
@@ -85,6 +87,7 @@ pub enum Reset {
     /// The Block outline or Mob hitbox page's Reset.
     Page,
     Counter,
+    Armor,
     Cps,
     Fps,
     Zoom,
@@ -105,6 +108,9 @@ pub enum Page {
     Block,
     Mob,
     Counter,
+    Armor,
+    VanillaHud,
+    HiveUtilities,
     Cps,
     Fps,
     Zoom,

@@ -86,7 +86,7 @@ pub(super) fn content_in(settings: &Settings, seconds: f32, state: MenuState) ->
         r#",{{"kind":"toggle","id":"show_all_mobs","label":"All mobs","value":{}}}"#,
         settings.show_all_mobs
     );
-    controls.push_str(r#",{"kind":"button","id":"edit_aim","label":"Aimed colour"}"#);
+    controls.push_str(r#",{"kind":"button","id":"edit_aim","label":"Aimed colour"},{"kind":"button","id":"edit_arrow","label":"Arrow colour"}"#);
     controls
         .push_str(r#",{"kind":"button","id":"highlight_less","label":"Weaker highlight hiding"}"#);
     controls.push_str(
@@ -110,6 +110,11 @@ pub(super) fn content_in(settings: &Settings, seconds: f32, state: MenuState) ->
     controls.push_str(r#",{"kind":"button","id":"counter_smaller","label":"Smaller counter"}"#);
     controls.push_str(r#",{"kind":"button","id":"counter_bigger","label":"Bigger counter"}"#);
     controls.push_str(r#",{"kind":"button","id":"counter_reset","label":"Reset counter place"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"armor_horizontal","label":"Horizontal armor","value":{}}},{{"kind":"toggle","id":"armor_percent","label":"Armor durability","value":{}}},{{"kind":"toggle","id":"armor_background","label":"Armor background","value":{}}}"#,
+        settings.armor.horizontal, settings.armor.percent, settings.armor.background
+    );
     controls.push_str(r#",{"kind":"button","id":"counter_done","label":"Done moving"}"#);
     controls.push_str(r#",{"kind":"button","id":"open_zoom","label":"Zoom"}"#);
     let _ = write!(
@@ -253,6 +258,29 @@ pub(super) fn content_in(settings: &Settings, seconds: f32, state: MenuState) ->
         r#",{{"kind":"toggle","id":"home_fps","label":"FPS counter on","value":{}}}"#,
         settings.fps.on
     );
+    controls.push_str(r#",{"kind":"button","id":"open_armor","label":"Armor HUD"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"home_armor","label":"Armor HUD on","value":{}}}"#,
+        settings.armor.on
+    );
+    controls.push_str(r#",{"kind":"button","id":"open_vanilla","label":"Vanilla HUD"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"show_hunger","label":"Show hunger","value":{}}}"#,
+        !settings.hide_hunger
+    );
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"effect_timers","label":"Effect timers","value":{}}},{{"kind":"toggle","id":"hotbar_keys","label":"Hotbar keys","value":{}}}"#,
+        settings.effect_timers, settings.hotbar_keys
+    );
+    controls.push_str(r#",{"kind":"button","id":"armor_move","label":"Move armor HUD"},{"kind":"button","id":"armor_size","label":"Armor size"},{"kind":"button","id":"armor_size_less","label":"Smaller armor"},{"kind":"button","id":"armor_size_more","label":"Bigger armor"},{"kind":"button","id":"armor_reset","label":"Reset armor position and size"}"#);
+    let _ = write!(
+        controls,
+        r#",{{"kind":"toggle","id":"fps_coords","label":"Coordinates","value":{}}},{{"kind":"toggle","id":"auto_queue","label":"Auto queue","value":{}}},{{"kind":"button","id":"open_hive","label":"Hive Utilities"}}"#,
+        settings.fps.coords, settings.auto_queue
+    );
     format!(
         r#"{{"reference_size":[{},{}],"motion":true,"widget_colors":{{"background":[0.07,0.08,0.1,0.98],"surface":[0.2,0.21,0.24,1],"text":[0.92,0.93,0.95,1],"accent":[0.45,0.24,0.75,1],"border":[0.36,0.37,0.42,1]}},"controls":[{controls}],"surface":{{"screen":"bo.screen","document":{},"bindings":{}}}}}"#,
         // Shrinks the whole menu on windows too small for the card, with a small margin.
@@ -334,6 +362,17 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     value(&mut out, FULLBRIGHT, &boolean(settings.fullbright));
     value(&mut out, COUNTER, &boolean(settings.counter.on));
     value(&mut out, COUNTER_BOW, &boolean(settings.counter.bow_only));
+    value(
+        &mut out,
+        ARMOR_HORIZONTAL,
+        &boolean(settings.armor.horizontal),
+    );
+    value(&mut out, ARMOR_PERCENT, &boolean(settings.armor.percent));
+    value(
+        &mut out,
+        ARMOR_BACKGROUND,
+        &boolean(settings.armor.background),
+    );
     value(&mut out, ZOOM_ON, &boolean(settings.zoom.on));
     value(&mut out, ZOOM_MODE, &boolean(settings.zoom.toggle));
     value(&mut out, ZOOM_SCROLL, &boolean(settings.zoom.scroll));
@@ -342,16 +381,22 @@ pub fn update(settings: &Settings, seconds: f32, state: MenuState) -> String {
     value(&mut out, CPS_RIGHT, &boolean(settings.cps.right));
     value(&mut out, CPS_ZEROS, &boolean(settings.cps.zeros));
     value(&mut out, FPS_ON, &boolean(settings.fps.on));
+    value(&mut out, FPS_COORDS, &boolean(settings.fps.coords));
+    value(&mut out, AUTO_QUEUE, &boolean(settings.auto_queue));
     value(&mut out, HOME_BLOCK_ON, &boolean(settings.block_on));
     value(&mut out, HOME_MOB_ON, &boolean(settings.mob_on));
     value(&mut out, HOME_COUNTER_ON, &boolean(settings.counter.on));
     value(&mut out, HOME_CPS_ON, &boolean(settings.cps.on));
     value(&mut out, HOME_FPS_ON, &boolean(settings.fps.on));
+    value(&mut out, SHOW_HUNGER, &boolean(!settings.hide_hunger));
+    value(&mut out, EFFECT_TIMERS, &boolean(settings.effect_timers));
+    value(&mut out, HOTBAR_KEYS, &boolean(settings.hotbar_keys));
     value(&mut out, HOME_ZOOM_ON, &boolean(settings.zoom.on));
     value(&mut out, HOME_LIGHT_ON, &boolean(settings.fullbright));
     value(&mut out, JUMP_ON, &boolean(settings.jump_reset.on));
     value(&mut out, HOME_JUMP_ON, &boolean(settings.jump_reset.on));
     value(&mut out, HOME_CROSS_ON, &boolean(settings.crosshair.on));
+    value(&mut out, HOME_ARMOR_ON, &boolean(settings.armor.on));
     value(&mut out, CROSS_ON, &boolean(settings.crosshair.on));
     value(
         &mut out,
@@ -393,6 +438,9 @@ pub(super) fn swatches(out: &mut String, settings: &Settings, seconds: f32) {
     out.push_str(r##","#aim_swatch":"##);
     let [r, g, b] = settings.aim_rgb.map(|c| f32::from(c) / 255.0);
     vector(out, [r, g, b, 1.0]);
+    out.push_str(r##","#arrow_swatch":"##);
+    let [r, g, b] = settings.arrow_rgb.map(|c| f32::from(c) / 255.0);
+    vector(out, [r, g, b, 1.0]);
     // The Crosshair page's colour button and the start page's crosshair icon.
     let [r, g, b] = settings.crosshair.rgb.map(|c| f32::from(c) / 255.0);
     out.push_str(r##","#crosshair_swatch":"##);
@@ -404,7 +452,10 @@ pub(super) fn swatches(out: &mut String, settings: &Settings, seconds: f32) {
 /// Whether the colour tools' hex code and saved colours carry the line opacity: only for the
 /// line, the colour that owns it. (The crosshair's opacity is a value of its own.)
 pub(super) fn edits_alpha(state: MenuState) -> bool {
-    !state.editing_fill && !state.editing_aim && state.page != Page::Crosshair
+    !state.editing_fill
+        && !state.editing_aim
+        && !state.editing_arrow
+        && state.page != Page::Crosshair
 }
 
 /// The colour the colour tools are editing: the crosshair's on its page, else the fill's own
@@ -412,6 +463,9 @@ pub(super) fn edits_alpha(state: MenuState) -> bool {
 pub(super) fn target_rgb(settings: &Settings, state: MenuState) -> [u8; 3] {
     if state.page == Page::Crosshair {
         return settings.crosshair.rgb;
+    }
+    if state.editing_arrow {
+        return settings.arrow_rgb;
     }
     if state.editing_aim {
         return settings.aim_rgb;
@@ -438,6 +492,10 @@ pub(super) fn target_hex(settings: &Settings, state: MenuState) -> String {
 pub(super) fn set_target_rgb(settings: &mut Settings, state: MenuState, rgb: [u8; 3]) {
     if state.page == Page::Crosshair {
         settings.crosshair.rgb = rgb;
+        return;
+    }
+    if state.editing_arrow {
+        settings.arrow_rgb = rgb;
         return;
     }
     if state.editing_aim {
@@ -535,17 +593,20 @@ pub fn fuel_update(state: MenuState) -> String {
     out
 }
 
-/// The fuel line's text: nothing until a frame has been measured.
+/// The fuel line's text: nothing until a frame has been measured. The line holds about 40
+/// characters before the menu clips it, so it stays short (the 200k cap is in the docs).
 pub(super) fn fuel_text(out: &mut String, state: MenuState) {
-    let [last, peak] = state.fuel_k;
+    let [avg, recent, peak] = state.fuel_k;
     if peak == 0 {
         return;
     }
-    out.push_str("Fuel per frame: ");
-    digits(out, u64::from(last));
-    out.push_str("k now, ");
+    out.push_str("Fuel: ");
+    digits(out, u64::from(avg));
+    out.push_str("k avg, ");
+    digits(out, u64::from(recent));
+    out.push_str("k recent, ");
     digits(out, u64::from(peak));
-    out.push_str("k busiest of 200k");
+    out.push_str("k peak");
 }
 
 /// A patch showing the moving guide at the top or the bottom of the screen.

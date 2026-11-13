@@ -701,3 +701,22 @@ fn an_empty_drawing_is_an_empty_box_and_the_grid_shows_the_pixels() {
         grid_plan(&DEFAULT_DRAWING.resized(32), [1, 2, 3]).header
     );
 }
+
+#[test]
+fn drawings_compare_by_size_and_every_pixel() {
+    let base = DEFAULT_DRAWING;
+    assert_eq!(base, base);
+    assert_eq!(base, DEFAULT_DRAWING.painted(0, 0, false, false));
+    // One pixel apart, in the first row, the last row of the grid and a middle one.
+    assert_ne!(base, base.painted(0, 0, true, false));
+    assert_ne!(base, base.painted(15, 15, true, false));
+    // Clearing a pixel that is set (row 7 of the default cross has bit 1 set).
+    assert_ne!(base, base.painted(7, 1, false, false));
+    // The same blank grid at another resolution is another drawing.
+    assert_ne!(Drawing::empty(16), Drawing::empty(32));
+    assert_eq!(Drawing::empty(64), Drawing::empty(64));
+    assert_ne!(
+        Drawing::empty(64),
+        Drawing::empty(64).painted(63, 63, true, false)
+    );
+}

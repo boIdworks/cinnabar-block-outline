@@ -41,9 +41,10 @@ pub const STEP_STEP: u8 = 5;
 impl Default for Zoom {
     fn default() -> Self {
         Self {
-            on: true,
+            on: false,
             toggle: false,
-            scroll: true,
+            // Off: it moves the hotbar slot too, which a first-time user should opt into.
+            scroll: false,
             sensitivity: true,
             level: 4.0,
             time: 0.25,

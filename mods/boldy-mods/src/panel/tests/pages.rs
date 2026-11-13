@@ -6,6 +6,9 @@ use super::*;
 fn arrow_counter_page_and_moving() {
     let mut s = Settings::default();
     let mut m = MenuState::default();
+    assert!(!s.counter.on, "off until asked for");
+    assert!(press(&mut s, &mut m, "home_counter", 1.0));
+    assert!(s.counter.on);
     assert!(press(&mut s, &mut m, "open_counter", 1.0));
     assert_eq!(m.page, Page::Counter);
     let shown = update(&s, 0.0, m);
@@ -92,12 +95,17 @@ fn the_fuel_line_shows_only_once_a_frame_was_measured() {
         fuel_update(state),
         r##"{"binding_changes":{"#fuel_text":""}}"##
     );
-    state.fuel_k = [41, 96];
+    state.fuel_k = [41, 96, 120];
     assert_eq!(
         fuel_update(state),
-        r##"{"binding_changes":{"#fuel_text":"Fuel per frame: 41k now, 96k busiest of 200k"}}"##
+        r##"{"binding_changes":{"#fuel_text":"Fuel: 41k avg, 96k recent, 120k peak"}}"##
     );
-    assert!(update(&Settings::default(), 0.0, state).contains("96k busiest of 200k"));
+    assert!(update(&Settings::default(), 0.0, state).contains("120k peak"));
+    // The menu clips a line at about 40 characters, so the longest it can be must stay under.
+    state.fuel_k = [199, 199, 199];
+    let line = fuel_update(state);
+    let text = line.split('"').nth(5).expect("the text");
+    assert!(text.len() <= 40, "{text} is {} characters", text.len());
 }
 
 #[test]
@@ -138,12 +146,18 @@ fn counter_settings_round_trip() {
 /// Button backgrounds inheriting one template and the namespace shortened to `bo`, which every
 /// wheel cell repeats, then saved 24 KiB, which the Crosshair page used most of: 173 KiB. The
 /// FPS counter page took it to 185 KiB; rectangles inheriting the `r` template then saved
-/// 13 KiB: 172 KiB.)
+/// 13 KiB: 172 KiB. The armor page and the Vanilla HUD switches took it to 184 KiB; the reserve
+/// went from 184 to 186 KiB for the effect-timer and hotbar-key switches: 184.3 KiB, so 7.7 KiB
+/// of the limit is still free. The coordinates switch took it to 186.9 KiB, so the reserve went
+/// to 188 KiB: 5.1 KiB of the limit is still free. The Hive Utilities page and its start page
+/// button (a button with its icon is about 1.4 KiB, the page 1.6 KiB) took it to 190.2 KiB, so
+/// the reserve went to 191 KiB: only 1.8 KiB of the limit is free, so the next page needs the
+/// document compacted first.)
 #[test]
 fn menu_document_stays_within_the_host_limit() {
     let size = document().len();
     assert!(
-        size <= 178 * 1024,
+        size <= 191 * 1024,
         "the menu document is {size} bytes; the host's limit is {} and some room is kept",
         192 * 1024
     );
@@ -153,6 +167,9 @@ fn menu_document_stays_within_the_host_limit() {
 fn the_jump_reset_page_has_a_switch_and_a_window_that_steps() {
     let mut s = Settings::default();
     let mut m = MenuState::default();
+    assert!(!s.jump_reset.on, "off until asked for");
+    assert!(press(&mut s, &mut m, "home_jump", 1.0));
+    assert!(s.jump_reset.on);
     assert!(press(&mut s, &mut m, "open_jump", 1.0));
     assert_eq!(m.page, Page::JumpReset);
     let shown = update(&s, 0.0, m);
@@ -246,6 +263,9 @@ fn the_keyboard_reaches_every_control_of_the_jump_reset_page() {
 fn zoom_page_values_switches_and_key() {
     let mut s = Settings::default();
     let mut m = MenuState::default();
+    assert!(!s.zoom.on, "off until asked for");
+    assert!(press(&mut s, &mut m, "home_zoom", 1.0));
+    assert!(s.zoom.on);
     assert!(press(&mut s, &mut m, "open_zoom", 1.0));
     assert_eq!(m.page, Page::Zoom);
     let shown = update(&s, 0.0, m);
@@ -297,12 +317,12 @@ fn zoom_page_values_switches_and_key() {
 
     // Switches.
     assert!(press(&mut s, &mut m, "zoom_mode", 1.0) && s.zoom.toggle);
-    // Scrolling moves the hotbar slot too, and the switch says so.
-    assert!(s.zoom.scroll);
-    assert!(switch_on(&shown, "zoom_scroll"));
-    assert!(press(&mut s, &mut m, "zoom_scroll", 0.0) && !s.zoom.scroll);
-    assert!(!switch_on(&update(&s, 0.0, m), "zoom_scroll"));
+    // Scrolling moves the hotbar slot too, so it starts off and the switch says so.
+    assert!(!s.zoom.scroll);
+    assert!(!switch_on(&shown, "zoom_scroll"));
     assert!(press(&mut s, &mut m, "zoom_scroll", 1.0) && s.zoom.scroll);
+    assert!(switch_on(&update(&s, 0.0, m), "zoom_scroll"));
+    assert!(press(&mut s, &mut m, "zoom_scroll", 0.0) && !s.zoom.scroll);
     assert!(press(&mut s, &mut m, "zoom_sens", 0.0) && !s.zoom.sensitivity);
     assert!(press(&mut s, &mut m, "zoom", 0.0) && !s.zoom.on);
     // Reset keeps the chosen key.
@@ -318,10 +338,10 @@ fn zoom_page_values_switches_and_key() {
     // An unbound key shows as not set, and the reset keeps it unbound.
     s.zoom.key = None;
     assert!(update(&s, 0.0, m).contains(r##""#zoom_key_text":"Click to set""##));
-    s.zoom.scroll = false;
+    s.zoom.scroll = true;
     assert!(confirmed(&mut s, &mut m, "zoom_reset"));
     assert_eq!(s.zoom.key, None);
-    assert!(s.zoom.scroll);
+    assert!(!s.zoom.scroll);
     s.zoom.key = KeyName::new("KeyZ");
 
     // Waiting for the zoom key keeps Escape for itself, and the button says so.
@@ -489,5 +509,175 @@ fn dump_snapshots() {
             crate::counter::patch(&view),
         )
         .unwrap();
+    }
+}
+
+#[test]
+fn armor_options_are_accessible_and_persist() {
+    let mut s = Settings::default();
+    let mut menu = MenuState::default();
+    assert!(!s.armor.on, "the armor HUD is off until asked for");
+    assert!(press(&mut s, &mut menu, "home_armor", 1.0));
+    assert!(s.armor.on);
+    assert!(press(&mut s, &mut menu, "home_armor", 0.0));
+    assert!(!s.armor.on);
+    assert!(press(&mut s, &mut menu, "home_armor", 1.0));
+    assert!(s.armor.on);
+    assert!(press(&mut s, &mut menu, "open_armor", 1.0));
+    assert_eq!(menu.page, Page::Armor);
+    assert!(press(&mut s, &mut menu, "armor_horizontal", 1.0));
+    assert!(press(&mut s, &mut menu, "armor_percent", 0.0));
+    assert!(press(&mut s, &mut menu, "armor_background", 1.0));
+    assert!(s.armor.horizontal && !s.armor.percent && s.armor.background);
+    assert_eq!(Settings::parse(&s.to_json()).armor, s.armor);
+}
+
+#[test]
+fn vanilla_hunger_switch_is_saved() {
+    let mut settings = Settings::default();
+    let mut menu = MenuState::default();
+    assert!(press(&mut settings, &mut menu, "open_vanilla", 1.0));
+    assert_eq!(menu.page, Page::VanillaHud);
+    assert!(press(&mut settings, &mut menu, "show_hunger", 0.0));
+    assert!(settings.hide_hunger);
+    assert!(Settings::parse(&settings.to_json()).hide_hunger);
+    assert!(press(&mut settings, &mut menu, "show_hunger", 1.0));
+    assert!(!settings.hide_hunger);
+}
+
+#[test]
+fn effect_timer_and_hotbar_key_switches_are_saved_and_default_off() {
+    // A settings file from before these existed leaves both off.
+    let old = Settings::parse(r#"{"block_on": true}"#);
+    assert!(!old.effect_timers && !old.hotbar_keys);
+    let mut settings = Settings::default();
+    let mut menu = MenuState::default();
+    assert!(press(&mut settings, &mut menu, "open_vanilla", 1.0));
+    assert!(press(&mut settings, &mut menu, "effect_timers", 1.0));
+    assert!(press(&mut settings, &mut menu, "hotbar_keys", 1.0));
+    assert!(settings.effect_timers && settings.hotbar_keys);
+    let saved = Settings::parse(&settings.to_json());
+    assert!(saved.effect_timers && saved.hotbar_keys);
+    assert!(press(&mut settings, &mut menu, "effect_timers", 0.0));
+    assert!(press(&mut settings, &mut menu, "hotbar_keys", 0.0));
+    assert!(!settings.effect_timers && !settings.hotbar_keys);
+    let saved = Settings::parse(&settings.to_json());
+    assert!(!saved.effect_timers && !saved.hotbar_keys);
+    assert!(press(&mut settings, &mut menu, "effect_timers", 1.0));
+    assert!(settings.effect_timers && !settings.hotbar_keys);
+    // The block outline reset leaves them as they were.
+    settings.reset();
+    assert!(settings.effect_timers && !settings.hotbar_keys);
+}
+
+#[test]
+fn armor_move_opens_editor_and_reset_restores_position() {
+    let mut settings = Settings::default();
+    let mut menu = MenuState {
+        page: Page::Armor,
+        ..MenuState::default()
+    };
+    assert!(press(&mut settings, &mut menu, "armor_move", 1.0));
+    assert!(menu.moving && menu.moving_armor && settings.armor.on);
+    settings.armor.pos = crate::counter::Pos::fraction(0.4, 0.3);
+    settings.armor.scale = 2.0;
+    assert!(press(&mut settings, &mut menu, "counter_reset", 1.0));
+    assert_eq!(settings.armor.pos, crate::armor::DEFAULT_POS);
+    assert_eq!(settings.armor.scale, 1.0);
+    assert!(press(&mut settings, &mut menu, "counter_done", 1.0));
+    assert!(!menu.moving && !menu.moving_armor);
+}
+
+#[test]
+fn armor_size_controls_match_other_hud_counters() {
+    let mut settings = Settings::default();
+    let mut menu = MenuState {
+        page: Page::Armor,
+        ..MenuState::default()
+    };
+    assert!(press(&mut settings, &mut menu, "armor_size_more", 1.0));
+    assert!((settings.armor.scale - 1.1).abs() < 0.001);
+    assert_eq!(
+        Settings::parse(&settings.to_json()).armor.scale,
+        settings.armor.scale
+    );
+    assert!(confirmed(&mut settings, &mut menu, "armor_reset"));
+    assert_eq!(settings.armor.scale, 1.0);
+    assert_eq!(settings.armor.pos, crate::armor::DEFAULT_POS);
+}
+
+#[test]
+fn the_fps_page_has_a_coordinates_switch_that_starts_off() {
+    let mut s = Settings::default();
+    let mut menu = MenuState::default();
+    assert!(!s.fps.coords, "off until asked for");
+    assert!(press(&mut s, &mut menu, "open_fps", 1.0));
+    assert_eq!(menu.page, Page::Fps);
+    assert!(!switch_on(&update(&s, 0.0, menu), "fps_coords"));
+    assert!(press(&mut s, &mut menu, "fps_coords", 1.0));
+    assert!(s.fps.coords && !s.fps.on, "the FPS stays as it was");
+    assert!(switch_on(&update(&s, 0.0, menu), "fps_coords"));
+    // It is its own switch: turning the FPS off leaves the coordinates on.
+    assert!(press(&mut s, &mut menu, "fps_on", 1.0));
+    assert!(s.fps.on && s.fps.coords);
+    assert!(press(&mut s, &mut menu, "fps_on", 0.0));
+    assert!(!s.fps.on && s.fps.coords);
+    assert!(press(&mut s, &mut menu, "fps_coords", 0.0));
+    assert!(!s.fps.coords);
+}
+
+#[test]
+fn the_auto_queue_switch_starts_off_changes_the_setting_and_is_saved() {
+    let mut s = Settings::default();
+    let mut menu = MenuState::default();
+    assert!(!s.auto_queue, "off until asked for");
+    assert!(press(&mut s, &mut menu, "open_hive", 1.0));
+    assert_eq!(menu.page, Page::HiveUtilities);
+    assert!(!switch_on(&update(&s, 0.0, menu), "auto_queue"));
+    assert!(press(&mut s, &mut menu, "auto_queue", 1.0));
+    assert!(s.auto_queue && !s.fullbright, "its own switch");
+    assert!(switch_on(&update(&s, 0.0, menu), "auto_queue"));
+    // What the menu changed is what the settings file holds, and it reads back.
+    let saved = s.to_json();
+    assert!(saved.contains("\"auto_queue\": true"), "{saved}");
+    assert!(Settings::parse(&saved).auto_queue);
+    assert!(press(&mut s, &mut menu, "auto_queue", 0.0));
+    assert!(!s.auto_queue);
+}
+
+#[test]
+fn every_feature_starts_off_so_a_new_user_chooses_what_to_turn_on() {
+    let s = Settings::default();
+    assert!(!s.block_on && !s.mob_on, "outlines");
+    assert!(!s.counter.on && !s.armor.on, "arrow counter and armor HUD");
+    assert!(!s.cps.on && !s.fps.on, "CPS and FPS");
+    assert!(
+        !s.zoom.on && !s.jump_reset.on && !s.crosshair.on,
+        "zoom, jump reset, crosshair"
+    );
+    assert!(!s.fullbright && !s.auto_queue, "fullbright and auto queue");
+    assert!(
+        !s.effect_timers && !s.hotbar_keys,
+        "effect timers and hotbar keys"
+    );
+    assert!(
+        !s.hide_hunger,
+        "the game's own hunger icons stay as the game has them"
+    );
+    // The start page and the pages show it: every switch reads off.
+    let shown = update(&s, 0.0, MenuState::default());
+    for home in [
+        "home_block",
+        "home_mob",
+        "home_counter",
+        "home_armor",
+        "home_cps",
+        "home_fps",
+        "home_zoom",
+        "home_light",
+        "home_jump",
+        "home_crosshair",
+    ] {
+        assert!(!switch_on(&shown, home), "{home}");
     }
 }

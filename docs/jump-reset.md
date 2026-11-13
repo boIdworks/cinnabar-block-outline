@@ -105,3 +105,13 @@ The mod only remembers its last 16 hits, so each run of the tool also saves what
 `block-outline.jump-history.txt` next to the settings file and reports on all of it. Run it after
 each play session and the hits add up instead of scrolling out. `--no-history` looks at the
 settings file alone.
+
+To remove all recorded jump reset hits, traces, resets, and report history, close the game first
+(otherwise the mod can save its in-memory data again), then run:
+
+```powershell
+python scripts\jump-reset-report.py clear
+```
+
+For a custom settings file, add its path after `clear`. Other settings are preserved. The shell's
+own `clear` command only clears the terminal display.

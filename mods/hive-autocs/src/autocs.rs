@@ -4,8 +4,8 @@
 //! `/p list`, then creates the server with `/cs` and answers Hive's menus: Create Server, BedWars,
 //! Squads. In the server, the player right-clicks the settings item once; the mod then loads the
 //! preset, sets the map and closes the menu. When the lobby reaches eight players (or on `!teams`)
-//! it asks for one more right-click and puts the party on RED and everyone else on the map's
-//! other team (see [`opponent`]); on maps without a known pairing Hive places everyone else.
+//! it asks for one more right-click and puts everyone outside the party on the map's
+//! other team; on non-BLUE pairings it also puts the party on RED (see [`opponent`]); on maps without a known pairing Hive places everyone else.
 //!
 //! Changing the map: when the player opens Hive's Map menu by hand in the server (say, to fix a
 //! misclick), the mod shows its own map menu instead and presses the picked map in Hive's. If the
@@ -42,6 +42,8 @@ const ANSWER_TICKS: u64 = 3;
 const MAX_STEPS: u32 = 120;
 /// Times the mod tries to move one player before leaving them as they are.
 const MAX_ROLE_TRIES: u8 = 2;
+
+const REPLAY_FORM: u32 = 2_000_000_002;
 
 const TAG: &str = "§d[Auto CS]§r";
 
@@ -93,6 +95,12 @@ pub struct AutoCs {
     images: Vec<(String, String)>,
     /// Hive's Map menu the player opened, held while the mod's map menu stands in for it.
     changing: Option<u32>,
+    replay_form: Option<(u32, usize)>,
+    replay_overview: Option<String>,
+    replay_reopen_at: Option<u64>,
+    awaiting_overview: bool,
+    picker_cancel_until: Option<u64>,
+    picker_reopen_at: Option<u64>,
     answers: Vec<(u64, Vec<u8>)>,
     to_client: Vec<u8>,
     to_server: Vec<u8>,
@@ -104,6 +112,7 @@ pub struct AutoCs {
 #[derive(Default)]
 struct Run {
     stage: Stage,
+    started_by_autocs: bool,
     map: String,
     preset: Task,
     map_task: Task,
@@ -171,6 +180,12 @@ impl AutoCs {
                 .map(|(map, url)| (map.to_string(), url.to_string()))
                 .collect(),
             changing: None,
+            replay_form: None,
+            replay_overview: None,
+            replay_reopen_at: None,
+            awaiting_overview: false,
+            picker_cancel_until: None,
+            picker_reopen_at: None,
             answers: Vec::new(),
             to_client: Vec::new(),
             to_server: Vec::new(),
@@ -203,6 +218,26 @@ impl AutoCs {
                 Some((PICKER_FORM, response, _)) => {
                     self.picked(response.as_deref());
                     true
+                }
+                Some((form, response, _)) if self.replay_form.is_some_and(|(id, _)| id == form) => {
+                    self.replay_form = None;
+                    match response
+                        .as_deref()
+                        .and_then(|s| s.trim().parse::<usize>().ok())
+                    {
+                        Some(0) => {
+                            if form != REPLAY_FORM {
+                                self.cancel(form);
+                            }
+                            self.autocs("");
+                            true
+                        }
+                        Some(index) if form != REPLAY_FORM => {
+                            self.answer(form, index - 1);
+                            true
+                        }
+                        _ => form == REPLAY_FORM,
+                    }
                 }
                 _ => false,
             },

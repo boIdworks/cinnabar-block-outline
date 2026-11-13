@@ -21,6 +21,9 @@ def main() -> None:
     cargo = [*wrapper, "cargo"]
     target = ROOT / "target"
     environment = dict(os.environ, CARGO_TARGET_DIR=str(target))
+    # `--fuel-profile` builds with the per-feature fuel profile, which costs fuel itself: it is for
+    # measuring, so rebuild without it before keeping the mod installed.
+    profile = ["--features", "fuel-profile"] if "--fuel-profile" in sys.argv[1:] else []
     subprocess.run(
         [
             *cargo,
@@ -29,6 +32,7 @@ def main() -> None:
             "--release",
             "-p",
             "boldy-mods",
+            *profile,
             "--target",
             "wasm32-unknown-unknown",
         ],
@@ -55,6 +59,8 @@ def main() -> None:
         check=True,
     )
     print(f"Built {output}")
+    if profile:
+        print("This is a fuel-profiling build: rebuild without --fuel-profile for everyday use.")
     if "--no-install" not in sys.argv[1:]:
         install(output)
 

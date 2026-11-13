@@ -41,10 +41,20 @@ fn settings_round_trip_and_legacy_rainbow() {
         },
         show_all_mobs: false,
         aim_rgb: [9, 9, 9],
+        arrow_rgb: [3, 4, 5],
         fullbright: true,
         fullbright_key: KeyName::new("KeyB"),
+        auto_queue: true,
         favourites: [Some([9, 8, 7, 6]), None, Some([255, 0, 0, 255]), None],
         next_favourite: 3,
+        armor: crate::armor::Armor {
+            pos: crate::armor::DEFAULT_POS,
+            scale: 1.7,
+            on: false,
+            horizontal: true,
+            percent: false,
+            background: true,
+        },
         counter: crate::counter::Counter {
             on: false,
             bow_only: true,
@@ -57,7 +67,7 @@ fn settings_round_trip_and_legacy_rainbow() {
         zoom: crate::zoom::Zoom {
             on: false,
             toggle: true,
-            scroll: false,
+            scroll: true,
             sensitivity: false,
             level: 6.5,
             time: 0.4,
@@ -82,6 +92,7 @@ fn settings_round_trip_and_legacy_rainbow() {
                 off: [20.5, -30.0],
             },
             scale: 2.3,
+            coords: true,
         },
         jump_reset: crate::jumpreset::JumpReset {
             on: false,
@@ -113,6 +124,9 @@ fn settings_round_trip_and_legacy_rainbow() {
         },
         block_on: false,
         mob_on: false,
+        hide_hunger: true,
+        effect_timers: false,
+        hotbar_keys: false,
     };
     assert_eq!(Settings::parse(&s.to_json()), s);
     // Crosshair values typed by hand are put on a step and kept in bounds.
@@ -799,6 +813,57 @@ fn edges_are_distinct_and_cover_the_cube() {
         assert_eq!(length, 1.0);
         assert!(!seen.contains(&(start, end)));
         seen.push((start, end));
+    }
+}
+
+#[test]
+fn the_wire_path_covers_every_cube_edge_in_unit_steps() {
+    // Each step moves one unit along one axis, between corners of the unit cube.
+    let mut covered = Vec::new();
+    for pair in WIRE_PATH.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let moved: Vec<usize> = (0..3).filter(|&axis| a[axis] != b[axis]).collect();
+        assert_eq!(
+            moved.len(),
+            1,
+            "a step changes one coordinate: {a:?} to {b:?}"
+        );
+        assert_eq!((a[moved[0]] - b[moved[0]]).abs(), 1.0);
+        assert!(a.iter().chain(&b).all(|&v| v == 0.0 || v == 1.0));
+        // The edge, whichever way it is run.
+        let (low, high) = if a[moved[0]] < b[moved[0]] {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        covered.push((low, high));
+    }
+    // All twelve edges are on the path...
+    for edge in EDGES {
+        let [start, end] = edge.unit_points();
+        assert!(
+            covered.contains(&(start, end)),
+            "edge {start:?}-{end:?} is on the path"
+        );
+    }
+    // ...and the three extra steps retrace edges already drawn: the least a single path can do
+    // for a cube (eight corners with an odd number of edges).
+    assert_eq!(covered.len(), 15);
+    let mut distinct = covered.clone();
+    distinct.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    distinct.dedup();
+    assert_eq!(distinct.len(), 12);
+}
+
+#[test]
+fn the_uploaded_pieces_are_the_axis_edges_then_the_wire_cube() {
+    assert_eq!(CUBE_PIECES, AXIS_UNIT_EDGES.len() + 1);
+    assert_eq!(WIRE_PIECE, CUBE_PIECES - 1);
+    // Edge `axis * 4` of the table is the one from the origin along that axis, which is what a
+    // segment along the axis is drawn from.
+    for (axis, unit) in AXIS_UNIT_EDGES.iter().enumerate() {
+        assert_eq!(EDGES[axis * 4].axis, axis);
+        assert_eq!(EDGES[axis * 4].unit_points(), *unit);
     }
 }
 

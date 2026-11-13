@@ -1,0 +1,58 @@
+name: Release
+
+# Push a tag such as v0.1.0 to publish both mods as a GitHub Release, so a player can download
+# block-outline.wasm and import it without installing Rust. See docs/releasing.md.
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Check, build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches the version in Cargo.toml
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f 2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+            exit 1
+          fi
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # The same gates as CI: a release is never built from code that fails them.
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (native, tests included)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (wasm guests)
+        run: cargo clippy -p boldy-mods -p hive-autocs --target wasm32-unknown-unknown --release --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+      - run: python3 -m pip install wasmtime
+      - name: Cinnabar accepts the HUD and menu documents
+        run: python3 scripts/check-host.py
+      - name: Build and pack both mods
+        run: |
+          python3 scripts/build-mod.py --no-install
+          python3 scripts/build-autocs.py --no-install
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum block-outline.wasm hive-autocs.wasm > SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/block-outline.wasm dist/hive-autocs.wasm dist/SHA256SUMS \
+            --title "Boldy Mods $GITHUB_REF_NAME" \
+            --generate-notes

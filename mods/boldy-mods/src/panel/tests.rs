@@ -13,6 +13,7 @@ const FILL: MenuState = MenuState {
     capturing_zoom: false,
     editing_fill: true,
     editing_aim: false,
+    editing_arrow: false,
     page: Page::Block,
     colour_open: true,
     typing: None,
@@ -21,8 +22,9 @@ const FILL: MenuState = MenuState {
     moving: false,
     moving_cps: false,
     moving_fps: false,
+    moving_armor: false,
     guide_bottom: false,
-    fuel_k: [0, 0],
+    fuel_k: [0, 0, 0],
     drawing: false,
     draw_full: false,
 };

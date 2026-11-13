@@ -17,6 +17,7 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
         "counter_reset" if !state.moving => Reset::Counter,
         "cps_reset" if !state.moving => Reset::Cps,
         "fps_reset" if !state.moving => Reset::Fps,
+        "armor_reset" if !state.moving => Reset::Armor,
         "zoom_reset" => Reset::Zoom,
         "crosshair_reset" => Reset::Crosshair,
         "crosshair_clear" => Reset::Drawing,
@@ -37,11 +38,15 @@ pub fn apply(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
 fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: f32) -> bool {
     match id {
         "open_block" | "open_mob" | "open_counter" | "open_cps" | "open_fps" | "open_zoom"
-        | "open_light" | "open_jump" | "open_crosshair" => {
+        | "open_light" | "open_jump" | "open_crosshair" | "open_armor" | "open_vanilla"
+        | "open_hive" => {
             if state.page != Page::Home {
                 return false;
             }
             state.page = match id {
+                "open_armor" => Page::Armor,
+                "open_vanilla" => Page::VanillaHud,
+                "open_hive" => Page::HiveUtilities,
                 "open_block" => Page::Block,
                 "open_mob" => Page::Mob,
                 "open_zoom" => Page::Zoom,
@@ -55,17 +60,19 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
             state.colour_open = false;
             state.editing_fill = false;
             state.editing_aim = false;
+            state.editing_arrow = false;
             state.drawing = false;
             return true;
         }
         // The start page's switches: each turns a mod on or off from the list.
         "home_block" | "home_mob" | "home_counter" | "home_cps" | "home_fps" | "home_zoom"
-        | "home_light" | "home_jump" | "home_crosshair" => {
+        | "home_light" | "home_jump" | "home_crosshair" | "home_armor" => {
             if state.page != Page::Home {
                 return false;
             }
             let on = value > 0.5;
             match id {
+                "home_armor" => settings.armor.on = on,
                 "home_block" => settings.block_on = on,
                 "home_mob" => settings.mob_on = on,
                 "home_counter" => settings.counter.on = on,
@@ -83,6 +90,7 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
                 return false;
             }
             state.moving = false;
+            state.moving_armor = false;
             commit_typing(settings, state);
             // One step back: from the colour tools or the drawing to the page, from the page to
             // the start.
@@ -99,6 +107,55 @@ fn apply_event(settings: &mut Settings, state: &mut MenuState, id: &str, value: 
         // Clicking another box applies what was typed in the previous one. Done here, on the
         // real settings: committing from inside a page's edit would be overwritten by it.
         _ if id.starts_with("type_") => commit_typing(settings, state),
+        "show_hunger" => {
+            settings.hide_hunger = value <= 0.5;
+            return true;
+        }
+        "effect_timers" => {
+            settings.effect_timers = value > 0.5;
+            return true;
+        }
+        "hotbar_keys" => {
+            settings.hotbar_keys = value > 0.5;
+            return true;
+        }
+        "armor_size" => {
+            settings.armor.scale = 1.0;
+            return true;
+        }
+        "armor_size_less" => {
+            settings.armor.scale = crate::counter::Counter::stepped(settings.armor.scale, -1.0);
+            return true;
+        }
+        "armor_size_more" => {
+            settings.armor.scale = crate::counter::Counter::stepped(settings.armor.scale, 1.0);
+            return true;
+        }
+        "armor_reset" => {
+            settings.armor.pos = crate::armor::DEFAULT_POS;
+            settings.armor.scale = 1.0;
+            return true;
+        }
+        "armor_move" => {
+            settings.armor.on = true;
+            state.moving = true;
+            state.moving_armor = true;
+            state.moving_cps = false;
+            state.moving_fps = false;
+            return true;
+        }
+        "armor_horizontal" => {
+            settings.armor.horizontal = value > 0.5;
+            return true;
+        }
+        "armor_percent" => {
+            settings.armor.percent = value > 0.5;
+            return true;
+        }
+        "armor_background" => {
+            settings.armor.background = value > 0.5;
+            return true;
+        }
         _ if id.starts_with("counter") => return apply_counter(settings, state, id, value),
         _ if id.starts_with("cps") => return apply_cps(settings, state, id, value),
         _ if id.starts_with("fps") => return apply_fps(settings, state, id, value),
@@ -128,13 +185,21 @@ fn apply_counter(settings: &mut Settings, state: &mut MenuState, id: &str, value
             // Something to drag: moving shows the counter even while it is off.
             counter.on = true;
             state.moving = true;
+            state.moving_armor = false;
             state.moving_cps = false;
             state.moving_fps = false;
         }
-        "counter_done" => state.moving = false,
+        "counter_done" => {
+            state.moving = false;
+            state.moving_armor = false;
+        }
         "counter_size" => counter.scale = 1.0,
         "counter_smaller" => counter.scale = Counter::stepped(counter.scale, -1.0),
         "counter_bigger" => counter.scale = Counter::stepped(counter.scale, 1.0),
+        "counter_reset" if state.moving_armor => {
+            settings.armor.pos = crate::armor::DEFAULT_POS;
+            settings.armor.scale = 1.0;
+        }
         "counter_reset" if state.moving_fps => {
             // The Reset in the moving guide resets whatever is being moved.
             settings.fps.pos = crate::fps::DEFAULT_POS;
@@ -167,6 +232,7 @@ fn apply_cps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
             // Something to drag: moving shows the readout even while it is off.
             cps.on = true;
             state.moving = true;
+            state.moving_armor = false;
             state.moving_cps = true;
             state.moving_fps = false;
         }
@@ -189,10 +255,12 @@ fn apply_fps(settings: &mut Settings, state: &mut MenuState, id: &str, value: f3
     let fps = &mut settings.fps;
     match id {
         "fps_on" => fps.on = value > 0.5,
+        "fps_coords" => fps.coords = value > 0.5,
         "fps_move" => {
             // Something to drag: moving shows the counter even while it is off.
             fps.on = true;
             state.moving = true;
+            state.moving_armor = false;
             state.moving_cps = false;
             state.moving_fps = true;
         }
@@ -393,24 +461,31 @@ pub(super) fn apply_page(
                 settings.fill_rgb = Some([settings.rgba[0], settings.rgba[1], settings.rgba[2]]);
             }
         }
-        "edit_line" | "edit_fill" | "edit_aim" => {
+        "edit_line" | "edit_fill" | "edit_aim" | "edit_arrow" => {
             let fill = id == "edit_fill";
             let aim = id == "edit_aim";
+            let arrow = id == "edit_arrow";
             if fill && settings.fill_rgb.is_none() {
                 // Hidden while the fill matches the line.
                 return false;
             }
-            if state.colour_open && state.editing_fill == fill && state.editing_aim == aim {
+            if state.colour_open
+                && state.editing_fill == fill
+                && state.editing_aim == aim
+                && state.editing_arrow == arrow
+            {
                 // Clicking the open one again hides the colour tools.
                 state.colour_open = false;
             } else {
                 state.colour_open = true;
                 state.editing_fill = fill;
                 state.editing_aim = aim;
+                state.editing_arrow = arrow;
             }
         }
         "show_all_mobs" => settings.show_all_mobs = value > 0.5,
         "fullbright" => settings.fullbright = value > 0.5,
+        "auto_queue" => settings.auto_queue = value > 0.5,
         "reset" => {
             // On the mob page this resets the mob look only (see `apply`).
             settings.reset();
@@ -418,9 +493,11 @@ pub(super) fn apply_page(
                 let defaults = Settings::default();
                 settings.show_all_mobs = defaults.show_all_mobs;
                 settings.aim_rgb = defaults.aim_rgb;
+                settings.arrow_rgb = defaults.arrow_rgb;
             }
             state.editing_fill = false;
             state.editing_aim = false;
+            state.editing_arrow = false;
         }
         _ if id.starts_with("type_") => {
             let field = if id == "type_hex" {

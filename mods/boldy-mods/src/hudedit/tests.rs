@@ -220,3 +220,34 @@ fn dragged_guide_lines_show_on_both_frames() {
     assert_eq!(out.edits[0].guides[0], Some(VIEWPORT[0] / 2.0));
     assert_eq!(out.edits[1].guides, out.edits[0].guides);
 }
+
+#[test]
+fn another_hud_item_can_be_moved_and_resized_in_the_shared_editor() {
+    let mut editor = Editor::default();
+    let mut values = items();
+    let untouched = values[0];
+    let origin = corner(&values, 1);
+    let grab = [origin[0] + 20.0, origin[1] + 5.0];
+    editor.step(&mut values, BASES, VIEWPORT, mouse(grab, true, true), GUIDE);
+    assert_eq!(editor.selected, 1);
+    editor.step(
+        &mut values,
+        BASES,
+        VIEWPORT,
+        mouse([grab[0] + 80.0, grab[1] + 35.0], false, true),
+        GUIDE,
+    );
+    assert_ne!(corner(&values, 1), origin);
+    assert_eq!(values[0], untouched);
+    editor.step(
+        &mut values,
+        BASES,
+        VIEWPORT,
+        Input {
+            steps: 2.0,
+            ..Input::default()
+        },
+        GUIDE,
+    );
+    assert!(values[1].scale > 1.0);
+}

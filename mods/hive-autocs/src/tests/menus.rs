@@ -41,9 +41,7 @@ fn recorded_hive_menus_get_the_recorded_answers() {
     h.client(&chat("!teams"));
     h.press(&recorded(5), 5, 0);
     h.press(&recorded(6), 6, 2);
-    h.press(&recorded(17), 17, 0);
-    h.press(&recorded(18), 18, 0);
-    let sent = h.close(&recorded(19), 19);
+    let sent = h.close(&recorded(17), 17);
     // Alone in the server: Boldworks is on RED, but the teams wait for more players and no
     // half-empty "Teams:" line is shown.
     assert!(sent.said("so the teams aren't finished"), "{:?}", sent.said);

@@ -34,10 +34,16 @@ pub(super) const HOME_JUMP_Y: f32 = HOME_LIGHT_Y + HOME_PITCH;
 
 pub(super) const HOME_CROSS_Y: f32 = HOME_JUMP_Y + HOME_PITCH;
 
+pub(super) const HOME_ARMOR_Y: f32 = HOME_CROSS_Y + HOME_PITCH;
+
+pub(super) const HOME_VANILLA_Y: f32 = HOME_ARMOR_Y + HOME_PITCH;
+
+pub(super) const HOME_HIVE_Y: f32 = HOME_VANILLA_Y + HOME_PITCH;
+
 pub(super) const HOME_BUTTON_H: f32 = 23.0;
 
 /// Below the page buttons: a Menu section.
-pub(super) const HOME_MENU_CAPTION_Y: f32 = HOME_CROSS_Y + HOME_BUTTON_H + 9.0;
+pub(super) const HOME_MENU_CAPTION_Y: f32 = HOME_HIVE_Y + HOME_BUTTON_H + 9.0;
 
 pub(super) const HOME_KEY_Y: f32 = HOME_MENU_CAPTION_Y + 14.0;
 
@@ -55,6 +61,11 @@ pub(super) const COUNTER_ON_Y: f32 = 34.0;
 
 pub(super) const COUNTER_BOW_Y: f32 = COUNTER_ON_Y + ROW_PITCH;
 
+/// The Vanilla HUD page: hunger on the first row, then the two label features.
+pub(super) const VANILLA_EFFECTS_Y: f32 = COUNTER_ON_Y + ROW_PITCH;
+
+pub(super) const VANILLA_HOTBAR_Y: f32 = VANILLA_EFFECTS_Y + ROW_PITCH;
+
 pub(super) const COUNTER_CAPTION_Y: f32 = COUNTER_BOW_Y + ROW_PITCH + SECTION_GAP;
 
 pub(super) const COUNTER_MOVE_Y: f32 = COUNTER_CAPTION_Y + 14.0;
@@ -62,6 +73,13 @@ pub(super) const COUNTER_MOVE_Y: f32 = COUNTER_CAPTION_Y + 14.0;
 pub(super) const COUNTER_SIZE_Y: f32 = COUNTER_MOVE_Y + ROW_PITCH;
 
 pub(super) const COUNTER_RESET_Y: f32 = COUNTER_SIZE_Y + ROW_PITCH;
+pub(super) const ARMOR_CAPTION_Y: f32 = 34.0;
+pub(super) const ARMOR_HORIZONTAL_Y: f32 = ARMOR_CAPTION_Y + 14.0;
+pub(super) const ARMOR_PERCENT_Y: f32 = ARMOR_HORIZONTAL_Y + ROW_PITCH;
+pub(super) const ARMOR_BACKGROUND_Y: f32 = ARMOR_PERCENT_Y + ROW_PITCH;
+pub(super) const ARMOR_MOVE_Y: f32 = ARMOR_BACKGROUND_Y + ROW_PITCH;
+pub(super) const ARMOR_SIZE_Y: f32 = ARMOR_MOVE_Y + ROW_PITCH;
+pub(super) const ARMOR_RESET_Y: f32 = ARMOR_SIZE_Y + ROW_PITCH;
 
 /// The CPS page's rows.
 pub(super) const CPS_ON_Y: f32 = 34.0;
@@ -81,7 +99,10 @@ pub(super) const CPS_RESET_Y: f32 = CPS_SIZE_Y + ROW_PITCH;
 /// The FPS counter page's rows.
 pub(super) const FPS_ON_Y: f32 = 34.0;
 
-pub(super) const FPS_CAPTION_Y: f32 = FPS_ON_Y + ROW_PITCH + SECTION_GAP;
+/// The coordinates switch, under the FPS one.
+pub(super) const FPS_COORDS_Y: f32 = FPS_ON_Y + ROW_PITCH;
+
+pub(super) const FPS_CAPTION_Y: f32 = FPS_COORDS_Y + ROW_PITCH + SECTION_GAP;
 
 pub(super) const FPS_MOVE_Y: f32 = FPS_CAPTION_Y + 14.0;
 
@@ -93,6 +114,18 @@ pub(super) const FPS_RESET_Y: f32 = FPS_SIZE_Y + ROW_PITCH;
 pub(super) const LIGHT_ON_Y: f32 = 34.0;
 
 pub(super) const LIGHT_KEY_Y: f32 = LIGHT_ON_Y + ROW_PITCH;
+
+/// The Hive Utilities page: the auto queue switch, then a note under it.
+pub(super) const HIVE_QUEUE_Y: f32 = 34.0;
+
+pub(super) const HIVE_NOTE_Y: f32 = HIVE_QUEUE_Y + ROW_PITCH + 6.0;
+
+/// What the page says under its switch; each line has to fit the card's width.
+pub(super) const HIVE_NOTE: [&str; 3] = [
+    "Queues the next game when one ends,",
+    "or when you are out and not in a",
+    "party. Queue once by hand first.",
+];
 
 /// The Jump reset page's rows: the switch, then the timing section with its value, and a note.
 pub(super) const JUMP_ON_Y: f32 = 34.0;
@@ -190,10 +223,13 @@ pub(super) fn card_height(state: MenuState) -> f32 {
         Page::Crosshair if state.drawing => DRAW_BUTTONS_Y + BUTTON_H + CARD_FOOT,
         Page::Home => HOME_KEY_Y + BUTTON_H + CARD_FOOT + FUEL_LINE,
         Page::Counter => COUNTER_RESET_Y + BUTTON_H + CARD_FOOT,
+        Page::Armor => ARMOR_RESET_Y + BUTTON_H + CARD_FOOT,
+        Page::VanillaHud => VANILLA_HOTBAR_Y + BUTTON_H + CARD_FOOT,
         Page::Cps => CPS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Fps => FPS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Zoom => ZOOM_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Lighting => LIGHT_KEY_Y + BUTTON_H + CARD_FOOT,
+        Page::HiveUtilities => HIVE_NOTE_Y + 12.0 * HIVE_NOTE.len() as f32 + CARD_FOOT,
         Page::JumpReset => JUMP_NOTE_Y + 12.0 * JUMP_NOTE.len() as f32 + CARD_FOOT,
         Page::Crosshair => CROSS_RESET_Y + BUTTON_H + CARD_FOOT,
         Page::Block => HIGHLIGHT_Y + BUTTON_H + CARD_FOOT,
@@ -307,8 +343,8 @@ pub(super) const HOME_GAP: f32 = 4.0;
 pub(super) const HOME_BUTTON_W: f32 = SETTINGS_W - 20.0 - HOME_SWITCH_W - HOME_GAP;
 
 /// What each start page button says under its name (Block, Mob, Counter, Zoom, CPS, Lighting,
-/// Jump reset, Crosshair).
-pub(super) const HOME_ABOUT: [&str; 9] = [
+/// Jump reset, Crosshair, FPS, Armor HUD, Vanilla HUD, Hive Utilities).
+pub(super) const HOME_ABOUT: [&str; 12] = [
     "The block you look at",
     "Mobs and players you look at",
     "Arrows left, on your HUD",
@@ -318,6 +354,9 @@ pub(super) const HOME_ABOUT: [&str; 9] = [
     "Times your jump after a hit",
     "Your own shape and colour",
     "Frames per second, on your HUD",
+    "Worn armor and its durability",
+    "Hunger, effects, hotbar keys",
+    "Queues your next Hive game",
 ];
 
 /// Settings sit in lighter inset panels, `SECTION_PAD` wider than their rows; the gap between two
@@ -348,10 +387,11 @@ pub(super) const TITLE_X: f32 = 8.0;
 pub(super) const ACCENT: [f32; 4] = [0.66, 0.5, 0.97, 1.0];
 
 /// The switch rows: bound by `#<name>_bg` (pill colour) and `#<name>_knob` (knob position).
-pub(super) const SWITCHES: [&str; 28] = [
+pub(super) const SWITCHES: [&str; 37] = [
     "home_block",
     "home_mob",
     "home_counter",
+    "home_armor",
     "home_cps",
     "home_zoom",
     "home_light",
@@ -362,6 +402,12 @@ pub(super) const SWITCHES: [&str; 28] = [
     "fullbright",
     "counter",
     "counter_bow",
+    "armor_horizontal",
+    "armor_percent",
+    "armor_background",
+    "show_hunger",
+    "effect_timers",
+    "hotbar_keys",
     "zoom",
     "zoom_mode",
     "zoom_scroll",
@@ -370,6 +416,8 @@ pub(super) const SWITCHES: [&str; 28] = [
     "cps_right",
     "cps_zeros",
     "fps_on",
+    "fps_coords",
+    "auto_queue",
     "home_fps",
     "home_jump",
     "jump_on",

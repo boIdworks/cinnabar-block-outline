@@ -57,8 +57,7 @@ impl AutoCs {
         if argument.is_empty() {
             self.run.stage = Stage::Picking;
             self.run.picker = menu_order(&self.maps);
-            let form = picker_form(&self.run.picker, &self.images, NEW_SERVER_TEXT);
-            packets::form_request(&mut self.to_client, PICKER_FORM, &form.to_string());
+            self.show_picker();
         } else {
             match find_map(&self.maps, argument) {
                 Some(map) => self.begin(map),
@@ -77,6 +76,15 @@ impl AutoCs {
         if self.run.stage != Stage::Picking {
             return;
         }
+        if response.is_none() {
+            if self.picker_reopen_at.is_some() {
+                return;
+            }
+            self.picker_cancel_until = Some(self.tick + 100);
+            return;
+        }
+        self.picker_reopen_at = None;
+        self.picker_cancel_until = None;
         let map = response
             .and_then(|response| response.trim().parse::<usize>().ok())
             .and_then(|index| self.run.picker.get(index).cloned());
@@ -89,6 +97,11 @@ impl AutoCs {
         }
     }
 
+    pub(super) fn show_picker(&mut self) {
+        let form = picker_form(&self.run.picker, &self.images, NEW_SERVER_TEXT);
+        packets::form_request(&mut self.to_client, PICKER_FORM, &form.to_string());
+    }
+
     /// Starts a run for `map`: the party command first, then the server.
     pub(super) fn begin(&mut self, map: String) {
         self.notes.push(format!(
@@ -96,6 +109,7 @@ impl AutoCs {
             self.invites
         ));
         self.say(&format!("Map §b{map}§r. Checking your party..."));
+        self.run.started_by_autocs = true;
         self.run.to_invite = self.invites.clone();
         self.run.map = map;
         self.run.preset = Task::Pending;

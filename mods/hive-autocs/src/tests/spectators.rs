@@ -251,11 +251,15 @@ mod invites_and_spectators {
         .map(|name| (name.to_string(), "Player".to_owned()))
         .collect();
         let (sent, _) = h.set_roles(22, &mut players);
-        assert_eq!(players[0].1, "RED");
+        assert_eq!(players[0].1, "Player");
         assert_eq!(players[1].1, "Spectator");
         assert_eq!(players[2].1, "BLUE");
         assert!(sent.said("H0nri is spectating"), "{:?}", sent.said);
-        assert!(sent.said("RED Boldworks | BLUE Charlie"), "{:?}", sent.said);
+        assert!(
+            sent.said("party roles left unchanged | BLUE Charlie"),
+            "{:?}",
+            sent.said
+        );
     }
 }
 

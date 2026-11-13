@@ -41,18 +41,18 @@ fn count_width(arrows: u32) -> f32 {
     width
 }
 
-/// While moving, with the mouse alone: the arrow counter, the CPS readout and the FPS counter all
-/// show their frames, and the editor ([`hudedit`]) moves or resizes what is dragged. Enter,
+/// While moving, the arrow counter, CPS, FPS and armor HUD all show their frames, and the editor ([`hudedit`]) moves or resizes what is dragged. Enter,
 /// Escape or the right button finish. Returns how each frame should look, in that order.
 fn drag_elements(
     controls: &input::Controls,
     settings: &mut Settings,
     viewport: [f32; 2],
-    // Each element's size at scale 1: the arrow counter, the CPS readout, the FPS counter.
-    bases: [[f32; 2]; 3],
+    // The unscaled size of each element, including the armor HUD.
+    bases: [[f32; 2]; 4],
     seconds: f32,
-) -> [counter::Edit; 3] {
-    let before = (settings.counter, settings.cps, settings.fps);
+) -> [counter::Edit; 4] {
+    let before = (settings.counter, settings.cps, settings.fps, settings.armor);
+    let (armor_corner, armor_size) = crate::armor::frame(settings.armor, viewport);
     let mut items = [
         hudedit::Item {
             pos: settings.counter.pos,
@@ -66,11 +66,17 @@ fn drag_elements(
             pos: settings.fps.pos,
             scale: settings.fps.scale,
         },
+        hudedit::Item {
+            pos: counter::centre(armor_corner, armor_size, viewport),
+            scale: settings.armor.scale,
+        },
     ];
     let mut state = MENU.with(StdCell::get);
     let mut editor = EDITOR.with(StdCell::get);
     // The element grabbed last (or whose button opened this) takes the keys.
-    editor.selected = if state.moving_fps {
+    editor.selected = if state.moving_armor {
+        3
+    } else if state.moving_fps {
         2
     } else {
         usize::from(state.moving_cps)
@@ -89,12 +95,26 @@ fn drag_elements(
     (settings.counter.pos, settings.counter.scale) = (items[0].pos, items[0].scale);
     (settings.cps.pos, settings.cps.scale) = (items[1].pos, items[1].scale);
     (settings.fps.pos, settings.fps.scale) = (items[2].pos, items[2].scale);
-    if (settings.counter, settings.cps, settings.fps) != before {
+    let new_size = bases[3].map(|side| side * items[3].scale);
+    let new_corner = counter::place(items[3].pos, new_size, viewport);
+    if new_corner != armor_corner || items[3].scale != settings.armor.scale {
+        settings.armor.scale = items[3].scale;
+        let offset = crate::armor::corner_offset(settings.armor);
+        settings.armor.pos = counter::Pos::anchored(
+            [
+                new_corner[0] - offset[0] * items[3].scale,
+                new_corner[1] - offset[1] * items[3].scale,
+            ],
+            viewport,
+        );
+    }
+    if (settings.counter, settings.cps, settings.fps, settings.armor) != before {
         set_settings(*settings);
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
     }
     state.moving_cps = editor.selected == 1;
     state.moving_fps = editor.selected == 2;
+    state.moving_armor = editor.selected == 3;
     if ["Escape", "Enter", "NumpadEnter", "MouseRight"]
         .iter()
         .any(|key| pressed(key))
@@ -102,6 +122,7 @@ fn drag_elements(
         state.moving = false;
         state.moving_cps = false;
         state.moving_fps = false;
+        state.moving_armor = false;
         MENU.with(|menu| menu.set(state));
         EDITOR.with(|e| e.set(hudedit::Editor::default()));
         push_menu_with(seconds, settings, state, true);
@@ -133,7 +154,11 @@ pub(super) fn arrow_counter(
             // send every binding again in case the host laid the layer out afresh.
             COUNT_WIDTH.with(|w| w.set(None));
             COUNTER_SHOWN.with(|shown| shown.set(None));
-            CPS_WIDTHS.with(|w| w.set(None));
+            CPS_WIDTHS.with(|probe| {
+                let mut reset = probe.get();
+                reset.reset();
+                probe.set(reset);
+            });
             CPS_SHOWN.with(|shown| shown.set(None));
             FPS_SHOWN.with(|shown| shown.set(None));
             JUMP_SHOWN.with(|shown| shown.set(None));
@@ -156,6 +181,9 @@ pub(super) fn arrow_counter(
         COUNTER_SHOWN.with(|shown| shown.set(None));
         CPS_SHOWN.with(|shown| shown.set(None));
         FPS_SHOWN.with(|shown| shown.set(None));
+        EFFECTS_SHOWN.with(|shown| shown.set(None));
+        HOTBAR_SHOWN.with(|shown| shown.set(None));
+        ARMOR_DIRTY.with(|dirty| dirty.set(true));
         JUMP_SHOWN.with(|shown| shown.set(None));
         // A new layer starts with the crosshair and the grid empty.
         CROSSHAIR_SENT.with(|sent| sent.set(NOTHING_SENT));
@@ -180,49 +208,54 @@ pub(super) fn arrow_counter(
     let panel_open = controls.is_some_and(|c| c.panel_open);
     let moving = state.moving && panel_open;
     let viewport = hud_size.map(|v| [v[0], v[1]]);
-    let mut settings = settings();
-    if let Some(viewport) = viewport.filter(|_| settings.counter.pos.is_fraction()) {
+    // Only the counter's own settings, in place; the whole copy is made on the paths that change
+    // settings (a position to pin, an element being dragged, a save).
+    let mut counter = settings_with(|s| s.counter);
+    if let Some(viewport) = viewport.filter(|_| counter.pos.is_fraction()) {
         // An older settings file kept the position as a share of the screen: pin it to the
         // nearest edge or the middle now, where it is on screen, and save that.
+        let mut settings = settings();
         settings.counter.pos = counter::Pos::anchored(settings.counter.pos.at(viewport), viewport);
+        counter = settings.counter;
         set_settings(settings);
         COUNTER_UNSAVED.with(|unsaved| unsaved.set(true));
-    }
-    if settings.counter.on {
-        refresh_quiver();
     }
     let quiver = QUIVER.with(StdCell::get).map(|(_, _, quiver)| quiver);
     let arrows = quiver.map_or(0, |quiver| quiver.arrows);
     let text_width = count_width(arrows);
-    let mut edits = [counter::Edit::default(); 3];
+    let mut edits = [counter::Edit::default(); 4];
     if let (true, Some(controls), Some(viewport)) = (moving, controls, viewport) {
+        let mut settings = settings();
         let (_, _, layout) = cps_reading(seconds, &settings.cps);
-        let fps_width = cps_widths().fps_width(FPS.with(StdCell::get).fps());
+        let (fps_width, coords) = fps_lines(settings.fps, FPS.with(StdCell::get).fps(), true);
         let bases = [
             counter::size(1.0, text_width),
             cps::base(layout.total),
-            fps::base(fps_width),
+            fps::base(fps_width, coords.map_or(0.0, |(_, width)| width)),
+            crate::armor::base(settings.armor),
         ];
         edits = drag_elements(controls, &mut settings, viewport, bases, seconds);
+        counter = settings.counter;
     }
+    timed(S_ARMOR, || {
+        armor_frame(seconds, viewport, moving.then_some(edits[3]));
+    });
     // A moved counter is saved once, when moving ends, not on every step of a drag.
     let moving = MENU.with(StdCell::get).moving && panel_open;
-    EDIT_CPS.with(|edit| edit.set(moving.then_some(edits[1])));
-    EDIT_FPS.with(|edit| edit.set(moving.then_some(edits[2])));
+    let moving_others = moving;
+    EDIT_CPS.with(|edit| edit.set(moving_others.then_some(edits[1])));
+    EDIT_FPS.with(|edit| edit.set(moving_others.then_some(edits[2])));
     if !moving && COUNTER_UNSAVED.with(StdCell::get) {
-        COUNTER_UNSAVED.with(|unsaved| unsaved.set(false));
+        // The drag is over whether or not the save fits in this frame; the new place is already
+        // on screen, and only writing it down waits.
         EDITOR.with(|editor| editor.set(hudedit::Editor::default()));
-        save_settings(&settings);
+        save_moved_hud(seconds);
     }
-    let counter = settings.counter;
     let on_page = panel_open && state.page == panel::Page::Counter;
     let holding = || {
         !counter.bow_only
             || quiver.is_some_and(|quiver| {
-                let selected = player_state::read_selected_slot()
-                    .ok()
-                    .flatten()
-                    .map(|selected| selected.slot);
+                let selected = selected_slot().map(|(_, _, slot)| slot);
                 quiver.holding_bow(selected)
             })
     };
@@ -230,7 +263,7 @@ pub(super) fn arrow_counter(
     // still be found and placed, and the reason is clear.
     let unknown = quiver.is_none() && NO_PLAYER_STATUS.with(StdCell::get);
     // While the HUD is edited every element is shown, so each can be placed.
-    let visible = moving
+    let visible = moving_others
         || (counter.on && (quiver.is_some() || unknown) && (on_page || unknown || holding()));
     let view = match viewport.filter(|_| visible) {
         Some(viewport) => {
@@ -242,7 +275,7 @@ pub(super) fn arrow_counter(
                 size,
                 scale: counter.scale,
                 text_width,
-                edit: moving.then_some(edits[0]),
+                edit: moving_others.then_some(edits[0]),
             }
         }
         None => counter::View {
@@ -347,29 +380,89 @@ pub(super) fn cps_frame(
     }
 }
 
+thread_local! {
+    /// The block the player stands in, as last read; `None` when not known or not wanted.
+    static COORDS: StdCell<Option<fps::Coords>> = const { StdCell::new(None) };
+    /// The time before which the position is not read again.
+    static COORDS_NEXT: StdCell<f32> = const { StdCell::new(0.0) };
+}
+
+/// Fuel a frame needs left to read the position; with less, the last one stays and a later frame
+/// reads it.
+const COORDS_RESERVE: u64 = 30_000;
+
+/// Reads where the player stands, at most every [`fps::COORDS_EVERY`] seconds and only while the
+/// coordinates are wanted (on, in a world): the one host call is skipped otherwise, and the last
+/// answer is dropped so a later start does not show an old position.
+fn refresh_coords(seconds: f32, wanted: bool) {
+    if !wanted {
+        if COORDS.with(StdCell::get).is_some() {
+            COORDS.with(|coords| coords.set(None));
+        }
+        return;
+    }
+    if seconds < COORDS_NEXT.with(StdCell::get) || headroom() < COORDS_RESERVE {
+        return;
+    }
+    COORDS_NEXT.with(|next| next.set(seconds + fps::COORDS_EVERY));
+    note_read();
+    let at = match player_state::read_world() {
+        Ok(Some(world)) => fps::block_of(world.position),
+        _ => None,
+    };
+    COORDS.with(|coords| coords.set(at));
+}
+
+/// What the counter shows: the width of the FPS text (0 when it is not shown) and the coordinates
+/// line with its width (`None` when it is off or the position is not known). While the HUD is
+/// being edited (`editing`) a counter with nothing to show still has its FPS text, and unknown
+/// coordinates read as zeros, so there is something to grab.
+fn fps_lines(settings: fps::Fps, fps_now: u32, editing: bool) -> (f32, Option<(fps::Coords, f32)>) {
+    let widths = cps_widths();
+    let show_fps = settings.on || (editing && !settings.coords);
+    let width = if show_fps {
+        widths.fps_width(fps_now)
+    } else {
+        0.0
+    };
+    let coords = settings
+        .coords
+        .then(|| COORDS.with(StdCell::get).or(editing.then_some([0; 3])))
+        .flatten()
+        .map(|coords| (coords, fps::coords_width(&widths, coords)));
+    (width, coords)
+}
+
 /// Keeps the FPS counter on the HUD up to date. The frames are counted in `frame_body`; the
-/// number changes every [`fps::EVERY`] seconds, so the HUD is patched about twice a second.
-pub(super) fn fps_frame(seconds: f32, hud_size: Option<[f32; 3]>) {
+/// number changes every [`fps::EVERY`] seconds, so the HUD is patched about twice a second. With
+/// the coordinates on, the block the player stands in is read ten times a second and the line is
+/// patched only when it changes.
+pub(super) fn fps_frame(seconds: f32, hud_size: Option<[f32; 3]>, in_world: bool) {
     let settings = settings_with(|s| s.fps);
+    timed(S_COORDS, || {
+        refresh_coords(seconds, settings.coords && in_world);
+    });
     // The layer is published by the arrow counter; patch it only once it is up.
     if !HUD_PUBLISHED.with(StdCell::get) {
         FPS_SHOWN.with(|shown| shown.set(None));
         return;
     }
     let edit = EDIT_FPS.with(StdCell::get);
-    let view = match hud_size.filter(|_| settings.on || edit.is_some()) {
+    let fps = FPS.with(StdCell::get).fps();
+    let (width, coords) = fps_lines(settings, fps, edit.is_some());
+    let view = match hud_size.filter(|_| width > 0.0 || coords.is_some()) {
         Some(viewport) => {
-            let fps = FPS.with(StdCell::get).fps();
-            let width = cps_widths().fps_width(fps);
             let scale = cps::clamp_scale(settings.scale);
+            let coords_width = coords.map_or(0.0, |(_, width)| width);
             fps::View {
                 visible: true,
                 fps,
                 scale,
                 width,
+                coords,
                 offset: counter::place(
                     settings.pos,
-                    fps::size(scale, width),
+                    fps::size(scale, width, coords_width),
                     [viewport[0], viewport[1]],
                 ),
                 edit,
@@ -419,6 +512,18 @@ fn afford(cost: u64) -> bool {
     true
 }
 
+/// The host replaces the entire hidden list at once, so keep both features together.
+fn hidden_elements(crosshair: bool, hunger: bool) -> Vec<hud::VanillaElement> {
+    let mut hidden = Vec::with_capacity(2);
+    if crosshair {
+        hidden.push(hud::VanillaElement::Crosshair);
+    }
+    if hunger {
+        hidden.push(hud::VanillaElement::Hunger);
+    }
+    hidden
+}
+
 /// The custom crosshair: shown in place of the game's own while it is switched on, and only
 /// where the game would draw its own (not with the HUD hidden or in third person). On its menu
 /// page it shows whatever the game does, so changes can be seen as they are made. The game's
@@ -428,35 +533,35 @@ fn afford(cost: u64) -> bool {
 /// (see [`crosshair`]); showing and hiding it is a binding. A refused patch is reported once
 /// and counted as sent, so it never turns into a patch every frame.
 pub(super) fn crosshair_frame(controls: Option<&input::Controls>, hud_size: Option<[f32; 3]>) {
-    let look = settings_with(|s| s.crosshair);
+    // The look is read in place: it holds the whole drawing (over 500 bytes), and copying and
+    // comparing it every frame was most of this section's cost. A copy is made only to work out
+    // a new plan.
+    let on = settings_with(|s| s.crosshair.on);
     let published = HUD_PUBLISHED.with(StdCell::get);
     // The game's crosshair gives way only while this one shows: not while it is still being
     // sent, nor where it cannot show (the HUD's size unknown), so there is always one.
-    let replace = look.on && published && CROSSHAIR_VISIBLE.with(StdCell::get) == Some(true);
-    if VANILLA_CROSSHAIR_HIDDEN.with(StdCell::get) != replace && hud_write() {
-        let hidden: &[hud::VanillaElement] = if replace {
-            &[hud::VanillaElement::Crosshair]
-        } else {
-            &[]
-        };
-        if hud::set_hidden_elements(hidden).is_ok() {
+    let replace = on && published && CROSSHAIR_VISIBLE.with(StdCell::get) == Some(true);
+    timed(S_XH_HIDE, || {
+        let hunger = settings_with(|s| s.hide_hunger);
+        if (VANILLA_CROSSHAIR_HIDDEN.with(StdCell::get) != replace
+            || VANILLA_HUNGER_HIDDEN.with(StdCell::get) != hunger)
+            && hud_write()
+            && hud::set_hidden_elements(&hidden_elements(replace, hunger)).is_ok()
+        {
             VANILLA_CROSSHAIR_HIDDEN.with(|cell| cell.set(replace));
+            VANILLA_HUNGER_HIDDEN.with(|cell| cell.set(hunger));
         }
-    }
+    });
     // The layer is published by the arrow counter; patch it only once it is up.
     if !published {
         return;
     }
     let previewing = controls.is_some_and(|c| c.panel_open)
         && MENU.with(StdCell::get).page == panel::Page::Crosshair;
-    let view = match hud_size {
-        Some(viewport) if look.on && (previewing || vanilla_crosshair_shown()) => {
-            Some(crosshair::View { look, viewport })
-        }
-        _ => None,
-    };
+    let viewport =
+        hud_size.filter(|_| on && (previewing || timed(S_XH_SHOWN, vanilla_crosshair_shown)));
     let visible = CROSSHAIR_VISIBLE.with(StdCell::get);
-    let Some(view) = view else {
+    let Some(viewport) = viewport else {
         if visible != Some(false) && hud_write() {
             CROSSHAIR_VISIBLE.with(|shown| shown.set(Some(false)));
             send(&crosshair::visibility(false), "crosshair");
@@ -464,12 +569,31 @@ pub(super) fn crosshair_frame(controls: Option<&input::Controls>, hud_size: Opti
         return;
     };
     // The shape and plan, worked out once for a view: a large drawing costs to work out.
-    let planned = CROSSHAIR_PLAN.with(|plan| {
-        plan.borrow()
-            .as_ref()
-            .is_some_and(|(known, ..)| *known == view)
+    // Settings that were not replaced since the plan was last checked against them need no
+    // comparing: the revision says so for a few instructions, and the comparison (which still
+    // costs about 1,900 fuel) is only made after a change.
+    let revision = SETTINGS_REV.with(StdCell::get);
+    let planned = timed(S_XH_PLAN, || {
+        if CROSSHAIR_CHECKED.with(StdCell::get) == Some((revision, viewport)) {
+            return true;
+        }
+        let same = settings_with(|s| {
+            CROSSHAIR_PLAN.with(|plan| {
+                plan.borrow().as_ref().is_some_and(|(known, ..)| {
+                    known.viewport == viewport && known.look == s.crosshair
+                })
+            })
+        });
+        if same {
+            CROSSHAIR_CHECKED.with(|checked| checked.set(Some((revision, viewport))));
+        }
+        same
     });
     if !planned {
+        let view = crosshair::View {
+            look: settings_with(|s| s.crosshair),
+            viewport,
+        };
         if HEAVY_FRAME.with(StdCell::get)
             || headroom() < crosshair::plan_cost(&view.look) + CROSSHAIR_SPARE
         {
@@ -478,11 +602,14 @@ pub(super) fn crosshair_frame(controls: Option<&input::Controls>, hud_size: Opti
         let shape = crosshair::view_shape(&view);
         let plan = crosshair::plan(&view, &shape);
         CROSSHAIR_PLAN.with(|known| *known.borrow_mut() = Some((view, shape, plan)));
+        // Made from the settings as they are now, so it matches them at this revision.
+        CROSSHAIR_CHECKED.with(|checked| checked.set(Some((revision, viewport))));
     }
     let sent = CROSSHAIR_SENT.with(StdCell::get);
     let patch = CROSSHAIR_PLAN.with(|known| {
         let known = known.borrow();
-        let (_, shape, plan) = known.as_ref()?;
+        // The stored view is the current one: it was just checked, or just made.
+        let (view, shape, plan) = known.as_ref()?;
         let step = next_step(plan, &sent)?;
         let cost = match step {
             None => crosshair::header_cost(shape),
@@ -495,11 +622,11 @@ pub(super) fn crosshair_frame(controls: Option<&input::Controls>, hud_size: Opti
         let patch = match step {
             None => {
                 sent.0 = Some(plan.header);
-                crosshair::header_patch(&view, shape)
+                crosshair::header_patch(view, shape)
             }
             Some(index) => {
                 sent.1[index] = Some(plan.parts[index]);
-                crosshair::part_patch(&view, shape, index)
+                crosshair::part_patch(view, shape, index)
             }
         };
         CROSSHAIR_SENT.with(|cell| cell.set(sent));
@@ -649,6 +776,7 @@ pub(super) fn jump_reset_frame(
         tracker.step(delta);
         if headroom() >= COMBAT_RESERVE {
             const LIMIT: usize = mod_api::MAX_COMBAT_READ_EVENTS;
+            note_read();
             if let Ok(events) = player_state::read_combat(feed.after, LIMIT as u32) {
                 let mut batch = [(0u64, false); LIMIT];
                 let count = events.len().min(LIMIT);
@@ -676,6 +804,7 @@ pub(super) fn jump_reset_frame(
         }
         // Your velocity every frame, so the frame of a hit has one before it to compare with.
         let motion = if headroom() >= COMBAT_RESERVE {
+            note_read();
             player_state::read_motion().ok().flatten()
         } else {
             None
@@ -814,46 +943,96 @@ fn cps_counts(seconds: f32, settings: &cps::Cps) -> (u32, Option<u32>) {
     })
 }
 
-/// The CPS text's pieces measured at text scale 1, once per GUI scale: `CPS:`, `FPS:`, a digit,
-/// a space and the bar. Measured with a digit beside them, as a trailing space may not count.
+/// The CPS text's pieces at text scale 1: `CPS:`, `FPS:`, a digit, a space and the bar.
+///
+/// The host may not be able to measure yet, or may measure before its fonts are ready, so a
+/// reading is not trusted until a second one agrees (see [`cps::WidthProbe`]); once they do, this
+/// is only a cell read. When the widths change, what was laid out with the old ones is redone.
 fn cps_widths() -> cps::Widths {
-    if let Some(widths) = CPS_WIDTHS.with(StdCell::get) {
-        return widths;
+    let mut probe = CPS_WIDTHS.with(StdCell::get);
+    let now = SECONDS.with(StdCell::get);
+    if probe.due(now) {
+        if probe.observe(now, measure_cps_widths()) {
+            CPS_SHOWN.with(|shown| shown.set(None));
+            FPS_SHOWN.with(|shown| shown.set(None));
+        }
+        CPS_WIDTHS.with(|cell| cell.set(probe));
     }
+    probe.widths()
+}
+
+/// Measures the pieces of the CPS and FPS text, `None` unless every one could be measured. Each is
+/// measured with a digit beside it, as a trailing space may not count.
+fn measure_cps_widths() -> Option<cps::Widths> {
     let measure = |text: &str| {
         hud::measure_text(text, hud::Font::Native)
             .ok()
             .filter(|width| width.is_finite() && *width > 0.0)
     };
-    let widths = match (
-        measure("0"),
-        measure("CPS:0"),
-        measure("FPS:0"),
-        measure(" 0"),
-        measure("|0"),
-    ) {
-        (Some(digit), Some(caption), Some(fps_caption), Some(space), Some(bar)) => cps::Widths {
-            caption: (caption - digit).max(0.0),
-            fps_caption: (fps_caption - digit).max(0.0),
-            digit,
-            space: (space - digit).max(1.0),
-            bar: (bar - digit).max(1.0),
-        },
-        _ => cps::Widths::GUESS,
-    };
-    CPS_WIDTHS.with(|w| w.set(Some(widths)));
-    widths
+    let digit = measure("0")?;
+    Some(cps::Widths {
+        caption: (measure("CPS:0")? - digit).max(0.0),
+        fps_caption: (measure("FPS:0")? - digit).max(0.0),
+        digit,
+        space: (measure(" 0")? - digit).max(1.0),
+        bar: (measure("|0")? - digit).max(1.0),
+    })
+}
+
+/// How long to wait before trying again after the settings file could not be written, in seconds.
+const SAVE_RETRY_SECONDS: f32 = 5.0;
+
+thread_local! {
+    /// The time before which a failed save of a moved HUD element is not tried again.
+    static COUNTER_SAVE_AT: StdCell<f32> = const { StdCell::new(0.0) };
+}
+
+/// Writes down a moved HUD element's place once a frame can afford it (a save is about 65,000
+/// fuel, and more with a big crosshair drawing) and has no other heavy job. Until it is written
+/// the change stays pending: a frame short of fuel, or a failed write, leaves it for a later one,
+/// and a further move meanwhile is saved by the same write.
+fn save_moved_hud(seconds: f32) {
+    if seconds < COUNTER_SAVE_AT.with(StdCell::get)
+        || HEAVY_FRAME.with(StdCell::get)
+        || headroom() < SAVE_RESERVE
+    {
+        return;
+    }
+    HEAVY_FRAME.with(|heavy| heavy.set(true));
+    if save_settings(&settings()) {
+        COUNTER_UNSAVED.with(|unsaved| unsaved.set(false));
+    } else {
+        COUNTER_SAVE_AT.with(|at| at.set(seconds + SAVE_RETRY_SECONDS));
+    }
+}
+
+/// Forgets the armor bindings built so far, so the next equipment read builds them again.
+/// Their display has to be refreshed too.
+fn armor_forget() {
+    ARMOR_PRINT.with(|print| print.set(None));
+    ARMOR_PENDING.with(|pending| {
+        if pending.borrow_mut().take().is_some() {
+            ARMOR_DIRTY.with(|dirty| dirty.set(true));
+        }
+    });
 }
 
 /// Recounts the arrows when the inventory changed since they were last counted. The equipment
 /// revision is a cheap check every frame; the inventory itself is only read after a change and
 /// with enough fuel left, otherwise in a later frame.
-fn refresh_quiver() {
+///
+/// The armor display is built from the same read, but only while the armor HUD is on and only
+/// when what its four cells show changed (by their [`crate::armor::Print`]), so an arrow used or an
+/// unrelated item moved formats nothing. Read while it is off, the armor is left unbuilt, and
+/// turning it on reads the equipment again.
+pub(super) fn refresh_quiver() {
+    note_read();
     let revisions = match player_state::read_revisions() {
         Ok(Some(revisions)) => revisions,
         Ok(None) => {
             // Not in a world.
             QUIVER.with(|q| q.set(None));
+            armor_forget();
             return;
         }
         Err(_) => {
@@ -864,20 +1043,27 @@ fn refresh_quiver() {
                 );
             }
             QUIVER.with(|q| q.set(None));
+            armor_forget();
             return;
         }
     };
     NO_PLAYER_STATUS.with(|n| n.set(false));
+    let armor_on = settings_with(|s| s.armor.on);
+    // The armor wants a read when it is on but has nothing built for the current equipment.
+    let armor_missing = armor_on && ARMOR_PRINT.with(StdCell::get).is_none();
     let known = QUIVER.with(StdCell::get);
-    if known.is_some_and(|(session, revision, _)| {
-        session == revisions.session && revision == revisions.equipment
-    }) {
+    if !armor_missing
+        && known.is_some_and(|(session, revision, _)| {
+            session == revisions.session && revision == revisions.equipment
+        })
+    {
         return;
     }
     if headroom() < INVENTORY_RESERVE {
         return;
     }
     HEAVY_FRAME.with(|heavy| heavy.set(true));
+    note_read();
     let counted = crate::arena::scratch(player_state::read_equipment, |equipment| {
         let Ok(Some(equipment)) = equipment else {
             return None;
@@ -886,14 +1072,278 @@ fn refresh_quiver() {
             let item = slot.item.as_ref()?;
             Some((item.identifier.as_deref()?, item.count))
         }
-        Some(Quiver::count(
+        let quiver = Quiver::count(
             equipment.inventory.iter().map(cell),
             cell(&equipment.offhand),
-        ))
+        );
+        let armor = if armor_on {
+            let print = armor_print(equipment);
+            // Unchanged armor builds nothing, unless the bindings it would be are not there.
+            let unchanged = ARMOR_PRINT.with(StdCell::get) == Some(print)
+                && ARMOR_PENDING.with(|pending| pending.borrow().is_some());
+            (!unchanged).then(|| (print, armor_bindings(equipment)))
+        } else {
+            None
+        };
+        Some((quiver, armor))
     });
     // Keyed by the revision checked above: a change since then is caught next frame.
-    QUIVER.with(|q| q.set(counted.map(|quiver| (revisions.session, revisions.equipment, quiver))));
+    let Some((quiver, armor)) = counted else {
+        return;
+    };
+    QUIVER.with(|q| q.set(Some((revisions.session, revisions.equipment, quiver))));
+    if !armor_on {
+        // The armor changed unseen, so it is built from a fresh read when it is switched on.
+        ARMOR_PRINT.with(|print| print.set(None));
+    } else if let Some((print, (bindings, percents))) = armor {
+        ARMOR_PERCENTS.with(|stored| stored.set(percents));
+        ARMOR_PENDING.with(|pending| *pending.borrow_mut() = Some(bindings));
+        ARMOR_PRINT.with(|stored| stored.set(Some(print)));
+        ARMOR_DIRTY.with(|dirty| dirty.set(true));
+    }
+}
+
+/// What the armor cells would show, as a summary to compare, without building the bindings.
+fn armor_print(equipment: &player_state::Equipment) -> u64 {
+    let mut print = crate::armor::Print::new();
+    for slot in equipment.armor.iter().take(4) {
+        print.cell(shown_armor(slot).map(|item| {
+            (
+                item.identifier.as_deref().unwrap_or_default(),
+                item.metadata,
+                crate::armor::durability(item.damage, item.max_durability),
+            )
+        }));
+    }
+    print.finish(equipment.armor.len().min(4))
+}
+
+/// The item an armor cell shows: a known cell holding an item the host named with a safe
+/// identifier.
+fn shown_armor(slot: &player_state::Slot) -> Option<&player_state::Item> {
+    slot.item.as_ref().filter(|item| {
+        slot.known
+            && item
+                .identifier
+                .as_deref()
+                .is_some_and(crate::armor::valid_id)
+    })
+}
+
+/// The armor HUD's bindings for the equipment, and each cell's durability percent for its bar.
+fn armor_bindings(equipment: &player_state::Equipment) -> (String, [Option<u32>; 4]) {
+    use std::fmt::Write;
+    // The four slots always show while the armor HUD is on, empty or not.
+    let mut armor = String::from(r##""#armor_any":true,"##);
+    let mut percents = [None; 4];
+    for (index, slot) in equipment.armor.iter().take(4).enumerate() {
+        if index > 0 {
+            armor.push(',');
+        }
+        let item = shown_armor(slot);
+        let _ = write!(
+            armor,
+            r##""#armor_visible_{index}":{},"#armor_text_{index}":""##,
+            item.is_some()
+        );
+        if let Some(item) = item {
+            if let Some(percent) = crate::armor::durability(item.damage, item.max_durability) {
+                let _ = write!(armor, "{percent}%");
+            }
+            if let Some(id) = item.identifier.as_deref() {
+                let _ = write!(
+                    armor,
+                    r##"","#armor_item_{index}":{{"item":{{"identifier":"{id}","metadata":{}}}}}"##,
+                    item.metadata
+                );
+            }
+        } else {
+            armor.push('"');
+        }
+        let percent =
+            item.and_then(|item| crate::armor::durability(item.damage, item.max_durability));
+        let _ = write!(
+            armor,
+            r##","#armor_bar_visible_{index}":{}"##,
+            percent.is_some()
+        );
+        if let Some(percent) = percent {
+            percents[index] = Some(percent);
+            let color = if percent > 50 {
+                "[0.25,1,0.1,1]"
+            } else if percent > 20 {
+                "[1,0.75,0.1,1]"
+            } else {
+                "[1,0.15,0.1,1]"
+            };
+            let _ = write!(armor, r##","#armor_bar_color_{index}":{color}"##);
+        }
+    }
+    // Missing cells must clear their old display too.
+    for index in equipment.armor.len().min(4)..4 {
+        if index > 0 {
+            armor.push(',');
+        }
+        let _ = write!(
+            armor,
+            r##""#armor_visible_{index}":false,"#armor_bar_visible_{index}":false,"#armor_text_{index}":"""##
+        );
+    }
+    (armor, percents)
 }
 
 #[cfg(test)]
 mod tests;
+
+thread_local! {
+    static EFFECTS_NEXT: StdCell<f32> = const { StdCell::new(0.0) };
+    /// What the timers last sent, as a [`crate::effects::fingerprint`]; `None` is blank.
+    static EFFECTS_SHOWN: StdCell<Option<u64>> = const { StdCell::new(None) };
+}
+
+/// Poll at five Hz so newly applied effects appear promptly; an unchanged poll sends nothing.
+/// Switched off or out of a world it makes no host call, and blanks the labels once.
+pub(super) fn effects_frame(seconds: f32, in_world: bool) {
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        return;
+    }
+    let shown = EFFECTS_SHOWN
+        .with(StdCell::get)
+        .unwrap_or(crate::effects::BLANK);
+    let wanted = in_world && settings_with(|s| s.effect_timers);
+    if !wanted && shown == crate::effects::BLANK {
+        return;
+    }
+    if (wanted && seconds < EFFECTS_NEXT.with(StdCell::get))
+        || headroom() < 90_000
+        || HEAVY_FRAME.with(StdCell::get)
+    {
+        return;
+    }
+    let mut codes = [0; crate::effects::SLOTS];
+    if wanted {
+        EFFECTS_NEXT.with(|next| next.set(seconds + 0.2));
+        note_read();
+        match player_state::read_effects() {
+            Ok(Some(value)) => crate::effects::fill(
+                &mut codes,
+                value
+                    .effects
+                    .iter()
+                    .map(|effect| (effect.effect_id, effect.remaining_ticks)),
+            ),
+            Ok(None) => {}
+            Err(_) => return,
+        }
+    }
+    let print = crate::effects::fingerprint(&codes);
+    if print == shown {
+        return;
+    }
+    if !hud_write() {
+        EFFECTS_NEXT.with(|next| next.set(seconds));
+        return;
+    }
+    let patch = format!(
+        r#"{{"binding_changes":{{{}}}}}"#,
+        crate::effects::bindings(&codes)
+    );
+    if hud::update_surface(&patch).is_ok() {
+        EFFECTS_SHOWN.with(|cell| cell.set(Some(print)));
+    } else {
+        HUD_PUBLISHED.with(|published| published.set(false));
+    }
+}
+
+type ArmorShown = (crate::armor::Armor, [f32; 2], Option<counter::Edit>);
+
+thread_local! {
+    static ARMOR_PENDING: RefCell<Option<String>> = const { RefCell::new(None) };
+    static ARMOR_DIRTY: StdCell<bool> = const { StdCell::new(true) };
+    /// The [`crate::armor::Print`] the pending bindings were built from; `None` while nothing is
+    /// built for the current equipment (armor off when it last changed, or not in a world).
+    static ARMOR_PRINT: StdCell<Option<u64>> = const { StdCell::new(None) };
+    static ARMOR_PERCENTS: StdCell<[Option<u32>; 4]> = const { StdCell::new([None; 4]) };
+    static ARMOR_SETTINGS: StdCell<Option<ArmorShown>> = const { StdCell::new(None) };
+}
+
+/// Publish only when the shared equipment snapshot changes.
+fn armor_frame(seconds: f32, viewport: Option<[f32; 2]>, edit: Option<counter::Edit>) {
+    let Some(viewport) = viewport else {
+        return;
+    };
+    let settings = settings_with(|s| s.armor);
+    if ARMOR_SETTINGS.with(StdCell::get) != Some((settings, viewport, edit)) {
+        ARMOR_DIRTY.with(|dirty| dirty.set(true));
+    }
+    if !ARMOR_DIRTY.with(StdCell::get) || HEAVY_FRAME.with(StdCell::get) || headroom() < 40_000 {
+        return;
+    }
+    if !hud_write() {
+        return;
+    }
+    let result = ARMOR_PENDING.with(|value| {
+        let value = value.borrow();
+        let fallback;
+        // Bindings not built for the current equipment (armor was off when it changed) are not
+        // shown; the next equipment read builds them and marks the display dirty again.
+        let built = ARMOR_PRINT.with(StdCell::get).is_some();
+        let pending = match value.as_deref().filter(|_| settings.on && built) {
+            Some(pending) => pending,
+            None => {
+                fallback = crate::armor::empty_bindings();
+                &fallback
+            }
+        };
+        let layout = crate::armor::layout_bindings(
+            settings,
+            viewport,
+            edit,
+            ARMOR_PERCENTS.with(StdCell::get),
+        );
+        hud::update_surface(&format!(r#"{{"binding_changes":{{{pending},{layout}}}}}"#))
+    });
+    if result.is_ok() {
+        ARMOR_DIRTY.with(|dirty| dirty.set(false));
+        ARMOR_SETTINGS.with(|seen| seen.set(Some((settings, viewport, edit))));
+    } else {
+        HUD_PUBLISHED.with(|published| published.set(false));
+        HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+    }
+}
+
+/// Publish only after bindings or session visibility changes.
+pub(super) fn hotbar_frame(seconds: f32, in_world: bool) {
+    if !HUD_PUBLISHED.with(StdCell::get) {
+        return;
+    }
+    let revision = HOTBAR_KEYS.with(|keys| keys.borrow().0);
+    let visible = in_world && revision.is_some() && settings_with(|s| s.hotbar_keys);
+    let key = (revision.unwrap_or(0), visible);
+    if HOTBAR_SHOWN.with(StdCell::get) == Some(key)
+        || HEAVY_FRAME.with(StdCell::get)
+        || headroom() < 40_000
+    {
+        return;
+    }
+    if !hud_write() {
+        return;
+    }
+    let patch = HOTBAR_KEYS.with(|keys| {
+        use std::fmt::Write;
+        let keys = keys.borrow();
+        let mut out = format!(r##"{{"binding_changes":{{"#hotkeys_visible":{}"##, key.1);
+        for (i, label) in keys.1.iter().enumerate() {
+            let value = crate::panel::json_string(label.as_deref().unwrap_or(""));
+            let _ = write!(out, r##","#hotkey_{i}":{value}"##);
+        }
+        out.push_str("}}");
+        out
+    });
+    if hud::update_surface(&patch).is_ok() {
+        HOTBAR_SHOWN.with(|shown| shown.set(Some(key)));
+    } else {
+        HUD_PUBLISHED.with(|published| published.set(false));
+        HUD_RETRY_AT.with(|at| at.set(seconds + HUD_RETRY_SECONDS));
+    }
+}

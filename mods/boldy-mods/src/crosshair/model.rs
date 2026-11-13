@@ -60,10 +60,25 @@ pub const MAX_RUNS: u64 = 320;
 
 /// The player's own drawing: `size` pixels a side, a row each from the top; bit `n` of a row is
 /// its pixel `n` from the left. Bits and rows past `size` are always clear.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct Drawing {
     size: u8,
     pub(super) rows: [u64; MAX_GRID],
+}
+
+impl PartialEq for Drawing {
+    /// Compared row by row, and only the rows in use: the derived comparison of the whole array is
+    /// a byte-by-byte `bcmp` in the wasm build, which cost about 12,000 fuel every frame the
+    /// custom crosshair was up (rows past `size` are always clear, so they cannot differ).
+    fn eq(&self, other: &Self) -> bool {
+        self.size == other.size
+            && self
+                .rows
+                .iter()
+                .zip(&other.rows)
+                .take(usize::from(self.size))
+                .all(|(a, b)| a == b)
+    }
 }
 
 /// The default drawing: a cross two pixels thick, centred on the grid's middle.

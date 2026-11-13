@@ -82,15 +82,31 @@ pub(in crate::panel) fn top_controls() -> Vec<String> {
                     &[
                         edit_button(
                             "edit_line",
-                            [10.0, EDIT_Y, HALF, BUTTON_H],
+                            [10.0, EDIT_Y, (SETTINGS_W - 28.0) / 3.0, BUTTON_H],
                             EDIT_LINE,
                             "#line_swatch",
                         ),
                         edit_button(
                             "edit_aim",
-                            [right, EDIT_Y, HALF, BUTTON_H],
+                            [
+                                10.0 + (SETTINGS_W - 28.0) / 3.0 + 4.0,
+                                EDIT_Y,
+                                (SETTINGS_W - 28.0) / 3.0,
+                                BUTTON_H,
+                            ],
                             EDIT_AIM,
                             "#aim_swatch",
+                        ),
+                        edit_button(
+                            "edit_arrow",
+                            [
+                                10.0 + 2.0 * ((SETTINGS_W - 28.0) / 3.0 + 4.0),
+                                EDIT_Y,
+                                (SETTINGS_W - 28.0) / 3.0,
+                                BUTTON_H,
+                            ],
+                            EDIT_ARROW,
+                            "#arrow_swatch",
                         ),
                     ],
                 ),
@@ -241,6 +257,31 @@ pub(in crate::panel) fn home_controls() -> Vec<String> {
         ),
         home_switch("home_jump", HOME_JUMP_Y, HOME_JUMP_ON),
         home_switch("home_crosshair", HOME_CROSS_Y, HOME_CROSS_ON),
+        page_button(
+            "open_armor",
+            HOME_ARMOR_Y,
+            OPEN_ARMOR,
+            9,
+            "Armor HUD",
+            HOME_ABOUT[9],
+        ),
+        home_switch("home_armor", HOME_ARMOR_Y, HOME_ARMOR_ON),
+        page_button(
+            "open_vanilla",
+            HOME_VANILLA_Y,
+            OPEN_VANILLA,
+            10,
+            "Vanilla HUD",
+            HOME_ABOUT[10],
+        ),
+        page_button(
+            "open_hive",
+            HOME_HIVE_Y,
+            OPEN_HIVE,
+            11,
+            "Hive Utilities",
+            HOME_ABOUT[11],
+        ),
         caption("menu_caption", "Menu", HOME_MENU_CAPTION_Y),
         label(
             "key_title",
@@ -378,6 +419,25 @@ pub(in crate::panel) fn home_icon(name: &str, kind: usize, at: f32) -> Vec<Strin
             piece("i1", 9.5, 8.0, 3.0, 10.0, 0.5, true, 3),
             piece("i2", 15.0, 4.0, 3.0, 14.0, 0.5, true, 3),
         ],
+        // A chestplate: an outlined body with a neck notch.
+        9 => vec![
+            piece("i0", 4.0, 4.0, 14.0, 15.0, 2.0, true, 3),
+            piece("i1", 6.0, 6.0, 10.0, 11.0, 1.0, false, 4),
+            piece("i2", 8.0, 3.0, 6.0, 5.0, 2.0, false, 5),
+        ],
+        // The game's own HUD: three bars, health, food and the hotbar.
+        10 => vec![
+            piece("i0", 3.0, 4.0, 16.0, 3.0, 1.0, true, 3),
+            piece("i1", 3.0, 9.5, 16.0, 3.0, 1.0, true, 3),
+            piece("i2", 3.0, 15.0, 16.0, 3.0, 1.0, true, 3),
+        ],
+        // A play triangle in steps: the next game.
+        11 => vec![
+            piece("i0", 6.0, 4.0, 3.0, 14.0, 0.5, true, 3),
+            piece("i1", 9.0, 6.0, 3.0, 10.0, 0.5, true, 3),
+            piece("i2", 12.0, 8.0, 3.0, 6.0, 0.5, true, 3),
+            piece("i3", 15.0, 10.0, 2.0, 2.0, 0.5, true, 3),
+        ],
         // A magnifier: a ring and a handle.
         _ => vec![
             piece("i0", 4.0, 4.0, 12.0, 12.0, 6.0, true, 3),
@@ -439,6 +499,95 @@ pub(in crate::panel) fn counter_controls() -> Vec<String> {
             COUNTER_RESET,
         ),
     ]
+}
+
+/// The Armor HUD page.
+pub(in crate::panel) fn armor_controls() -> Vec<String> {
+    let full = SETTINGS_W - 20.0;
+    let mut page = vec![
+        caption("armor_caption", "Armor HUD", ARMOR_CAPTION_Y),
+        switch_button(
+            "armor_horizontal",
+            [10.0, ARMOR_HORIZONTAL_Y, full, BUTTON_H],
+            ARMOR_HORIZONTAL,
+            "Horizontal layout",
+        ),
+        switch_button(
+            "armor_percent",
+            [10.0, ARMOR_PERCENT_Y, full, BUTTON_H],
+            ARMOR_PERCENT,
+            "Show durability %",
+        ),
+        switch_button(
+            "armor_background",
+            [10.0, ARMOR_BACKGROUND_Y, full, BUTTON_H],
+            ARMOR_BACKGROUND,
+            "Slot background",
+        ),
+        plain_button(
+            "armor_move",
+            [10.0, ARMOR_MOVE_Y, full, BUTTON_H],
+            ARMOR_MOVE,
+            "Move and resize on screen",
+        ),
+    ];
+    page.extend(stepper(
+        "armor_size",
+        ARMOR_SIZE_Y,
+        ARMOR_SIZE,
+        ARMOR_SMALLER,
+        ARMOR_BIGGER,
+    ));
+    page.push(action_button(
+        "armor_reset",
+        [10.0, ARMOR_RESET_Y, full, BUTTON_H],
+        ARMOR_RESET,
+    ));
+    page
+}
+
+/// Vanilla HUD controls supported by the host.
+pub(in crate::panel) fn vanilla_controls() -> Vec<String> {
+    vec![
+        switch_button(
+            "show_hunger",
+            [10.0, COUNTER_ON_Y, SETTINGS_W - 20.0, BUTTON_H],
+            SHOW_HUNGER,
+            "Show hunger",
+        ),
+        switch_button(
+            "effect_timers",
+            [10.0, VANILLA_EFFECTS_Y, SETTINGS_W - 20.0, BUTTON_H],
+            EFFECT_TIMERS,
+            "Effect timers",
+        ),
+        switch_button(
+            "hotbar_keys",
+            [10.0, VANILLA_HOTBAR_Y, SETTINGS_W - 20.0, BUTTON_H],
+            HOTBAR_KEYS,
+            "Hotbar keys",
+        ),
+    ]
+}
+
+/// The Hive Utilities page: the auto queue switch and a note on what it does.
+pub(in crate::panel) fn hive_controls() -> Vec<String> {
+    let mut page = vec![switch_button(
+        "auto_queue",
+        [10.0, HIVE_QUEUE_Y, SETTINGS_W - 20.0, BUTTON_H],
+        AUTO_QUEUE,
+        "Auto queue",
+    )];
+    for (index, line) in HIVE_NOTE.iter().enumerate() {
+        page.push(label(
+            &format!("hive_note_{index}"),
+            line,
+            [SETTINGS_W - 20.0, 10.0],
+            [10.0, HIVE_NOTE_Y + 12.0 * index as f32],
+            DIM,
+        ));
+    }
+    page
 }
 
 /// The Lighting page: Fullbright and its key.
@@ -510,7 +659,7 @@ pub(in crate::panel) fn cps_controls() -> Vec<String> {
     page
 }
 
-/// The FPS counter page: on/off, moving, size and reset.
+/// The FPS counter page: on/off, the coordinates line, moving, size and reset.
 pub(in crate::panel) fn fps_controls() -> Vec<String> {
     let full = SETTINGS_W - 20.0;
     let mut page = vec![
@@ -519,6 +668,12 @@ pub(in crate::panel) fn fps_controls() -> Vec<String> {
             [10.0, FPS_ON_Y, full, BUTTON_H],
             FPS_ON,
             "Show FPS",
+        ),
+        switch_button(
+            "fps_coords",
+            [10.0, FPS_COORDS_Y, full, BUTTON_H],
+            FPS_COORDS,
+            "Show coordinates",
         ),
         caption("fps_caption", "Place", FPS_CAPTION_Y),
         plain_button(

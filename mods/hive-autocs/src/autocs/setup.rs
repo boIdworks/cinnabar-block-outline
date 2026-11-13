@@ -9,6 +9,29 @@ impl AutoCs {
             return false;
         };
         let menu = Menu::new(&value);
+        if menu.title == "Game Over!" && self.awaiting_overview {
+            self.awaiting_overview = false;
+            if self.run.stage != Stage::Lobby {
+                self.cancel(form);
+                return true;
+            }
+        }
+        if self.run.started_by_autocs
+            && self.run.stage == Stage::Lobby
+            && menu.title == "Game Over!"
+        {
+            let mut replay = value.clone();
+            if let Some(buttons) = replay.get_mut("buttons").and_then(Value::as_array_mut) {
+                buttons.insert(
+                    0,
+                    serde_json::json!({"text": "Replay CS\nChoose the next map"}),
+                );
+                self.replay_form = Some((form, 0));
+                self.replay_overview = Some(replay.to_string());
+                packets::form_request(&mut self.to_client, form, &replay.to_string());
+                return true;
+            }
+        }
         if menu.title == "Map"
             && !self.run.navigating
             && matches!(self.run.stage, Stage::Idle | Stage::Lobby)

@@ -743,6 +743,44 @@ pub const EDGES: [Edge; 12] = {
     edges
 };
 
+/// A unit edge along each axis from the origin, stretched to any outline line along that axis.
+pub const AXIS_UNIT_EDGES: [[[f32; 3]; 2]; 3] = [
+    [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+    [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+    [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+];
+
+/// The unit cube's twelve edges as one polyline, so a box can be outlined with a single instance
+/// scaled to its size. A cube has eight corners where an odd number of edges meet, so no path can
+/// cover its edges exactly once; this one runs the bottom ring, up one edge, the top ring, then
+/// back over three top and bottom edges to take the other three upright edges. The three edges
+/// drawn twice are the cost of one instance instead of up to nine.
+pub const WIRE_PATH: [[f32; 3]; 16] = [
+    [0.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [1.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [0.0, 1.0, 1.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 1.0, 1.0],
+    [0.0, 1.0, 0.0],
+    [1.0, 1.0, 0.0],
+    [1.0, 1.0, 1.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 0.0, 0.0],
+];
+
+/// The geometries uploaded for outlines: one unit edge per axis, in axis order, then the wire cube
+/// ([`WIRE_PIECE`]).
+pub const CUBE_PIECES: usize = 4;
+
+/// Where the wire cube is among the uploaded pieces.
+pub const WIRE_PIECE: usize = 3;
+
 impl Edge {
     /// The two axes other than the edge's own, in increasing order.
     pub fn others(self) -> [usize; 2] {

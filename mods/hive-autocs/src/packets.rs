@@ -3,6 +3,7 @@
 use crate::wire::{Packet, Reader, push_packet, write_string, write_var_u32};
 
 pub const TEXT: u32 = 9;
+pub const MOB_EFFECT: u32 = 28;
 pub const CONTAINER_OPEN: u32 = 46;
 pub const COMMAND_REQUEST: u32 = 77;
 pub const MODAL_FORM_REQUEST: u32 = 100;

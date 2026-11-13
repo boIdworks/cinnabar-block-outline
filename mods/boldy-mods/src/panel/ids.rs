@@ -7,7 +7,8 @@ use super::*;
 pub(super) const SETTINGS_W: f32 = 264.0;
 
 /// Card height, the same for the settings and the colour tools so nothing moves when switching.
-pub(super) const CARD_H: f32 = 338.0;
+/// (Twelve page buttons and the Menu section fill the start page.)
+pub(super) const CARD_H: f32 = 413.0;
 
 /// Height of every button and small control row; tall enough to hit comfortably.
 pub(super) const BUTTON_H: f32 = 18.0;
@@ -75,7 +76,9 @@ pub(super) const SHOW_ALL: usize = OPEN_MOB + 1;
 pub(super) const EDIT_AIM: usize = SHOW_ALL + 1;
 
 /// The game highlight fix's - and + buttons.
-pub(super) const HIGHLIGHT_LESS: usize = EDIT_AIM + 1;
+pub(super) const EDIT_ARROW: usize = EDIT_AIM + 1;
+
+pub(super) const HIGHLIGHT_LESS: usize = EDIT_ARROW + 1;
 
 pub(super) const HIGHLIGHT_MORE: usize = HIGHLIGHT_LESS + 1;
 
@@ -106,7 +109,10 @@ pub(super) const COUNTER_BIGGER: usize = COUNTER_SMALLER + 1;
 pub(super) const COUNTER_RESET: usize = COUNTER_BIGGER + 1;
 
 /// Ends moving the counter.
-pub(super) const COUNTER_DONE: usize = COUNTER_RESET + 1;
+pub(super) const ARMOR_HORIZONTAL: usize = COUNTER_RESET + 1;
+pub(super) const ARMOR_PERCENT: usize = ARMOR_HORIZONTAL + 1;
+pub(super) const ARMOR_BACKGROUND: usize = ARMOR_PERCENT + 1;
+pub(super) const COUNTER_DONE: usize = ARMOR_BACKGROUND + 1;
 
 /// The start page's Zoom button and that page's controls: switches, the zoom key and three
 /// values, each a button that resets it beside its - and + buttons.
@@ -268,6 +274,31 @@ pub(super) const OPEN_FPS: usize = FPS_RESET + 1;
 
 pub(super) const HOME_FPS_ON: usize = OPEN_FPS + 1;
 
+pub(super) const OPEN_ARMOR: usize = HOME_FPS_ON + 1;
+pub(super) const HOME_ARMOR_ON: usize = OPEN_ARMOR + 1;
+
+pub(super) const OPEN_VANILLA: usize = HOME_ARMOR_ON + 1;
+pub(super) const SHOW_HUNGER: usize = OPEN_VANILLA + 1;
+
+pub(super) const EFFECT_TIMERS: usize = SHOW_HUNGER + 1;
+pub(super) const HOTBAR_KEYS: usize = EFFECT_TIMERS + 1;
+
+pub(super) const ARMOR_MOVE: usize = HOTBAR_KEYS + 1;
+pub(super) const ARMOR_SIZE: usize = ARMOR_MOVE + 1;
+pub(super) const ARMOR_SMALLER: usize = ARMOR_SIZE + 1;
+pub(super) const ARMOR_BIGGER: usize = ARMOR_SMALLER + 1;
+pub(super) const ARMOR_RESET: usize = ARMOR_BIGGER + 1;
+
+/// The FPS counter page's coordinates switch, added after the armor controls so no earlier index
+/// moves.
+pub(super) const FPS_COORDS: usize = ARMOR_RESET + 1;
+
+/// The Hive Utilities page's Auto queue switch, added last so no earlier index moves, and the
+/// start page's button for that page.
+pub(super) const AUTO_QUEUE: usize = FPS_COORDS + 1;
+
+pub(super) const OPEN_HIVE: usize = AUTO_QUEUE + 1;
+
 /// The last control index.
 #[cfg(test)]
-pub(super) const LAST_CONTROL: usize = HOME_FPS_ON;
+pub(super) const LAST_CONTROL: usize = OPEN_HIVE;
