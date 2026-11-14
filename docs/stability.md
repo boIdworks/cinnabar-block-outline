@@ -11,7 +11,9 @@ What the machine showed on 2026-11-09:
 - Cinnabar was on the **Nightly** channel with **Install updates when I quit** on, so each session
   can start on a different host build. In two days it went from 0.1.31 (build 131) to 0.2.1
   (build 148); upstream `dev` was a further 107 commits ahead of the pinned revision.
-- The pin is the 0.1.31 era. Cinnabar keeps older API revisions loadable and drops one only on a
+- The pin was the 0.1.31 era until 2026-11-14, when the nightly (core 8126f98c9) dropped that API
+  revision (`player-state` `read-actors-limited` changed its result type) and the mod went to
+  'error'. The pin is now `1b117928` (0.2.1); it built with no source changes. Cinnabar keeps older API revisions loadable and drops one only on a
   breaking change (`crates/mod-api/compatibility-revisions.json`, oldest first), so a mod keeps
   *loading* across most updates. What can still change is **behaviour**: four commits touching
   `crates/mod-api` landed between the pin and the installed build (sprint control, mod block

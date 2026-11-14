@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # The same Cinnabar revision as `mod-api` in the workspace Cargo.toml.
-ui = { git = "https://github.com/cinnabar-mc/cinnabar", rev = "8064f58fba3f2f504a0d5be82dfc32906d7ce49b" }
+ui = { git = "https://github.com/cinnabar-mc/cinnabar", rev = "1b11792886a54c48607a8a6e02f850af741c7492" }
 serde_json = "1"
 
 # Not a workspace member: it is built for wasm only, by the script.

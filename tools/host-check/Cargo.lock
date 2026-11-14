@@ -10,8 +10,8 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "assets"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 dependencies = [
  "bitflags",
  "block-transform",
@@ -23,6 +23,7 @@ dependencies = [
  "png",
  "protocol-ids",
  "rayon",
+ "render-api",
  "rustix",
  "serde",
  "serde_json",
@@ -53,8 +54,8 @@ dependencies = [
 
 [[package]]
 name = "block-transform"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 
 [[package]]
 name = "byteorder"
@@ -148,8 +149,8 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "env-compat"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 
 [[package]]
 name = "equivalent"
@@ -244,8 +245,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "json-ui"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 dependencies = [
  "pack-json",
  "serde",
@@ -326,8 +327,8 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "pack-json"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 dependencies = [
  "serde",
  "serde_json",
@@ -363,8 +364,8 @@ dependencies = [
 
 [[package]]
 name = "protocol-ids"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 
 [[package]]
 name = "quote"
@@ -397,8 +398,8 @@ dependencies = [
 
 [[package]]
 name = "render-api"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 
 [[package]]
 name = "rustix"
@@ -415,8 +416,8 @@ dependencies = [
 
 [[package]]
 name = "semantic-input"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 
 [[package]]
 name = "serde"
@@ -586,8 +587,8 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ui"
-version = "0.1.31"
-source = "git+https://github.com/cinnabar-mc/cinnabar?rev=8064f58fba3f2f504a0d5be82dfc32906d7ce49b#8064f58fba3f2f504a0d5be82dfc32906d7ce49b"
+version = "0.2.1"
+source = "git+https://github.com/cinnabar-mc/cinnabar?rev=1b11792886a54c48607a8a6e02f850af741c7492#1b11792886a54c48607a8a6e02f850af741c7492"
 dependencies = [
  "assets",
  "json-ui",

@@ -9,7 +9,7 @@ edition = "2024"
 rust-version = "1.99.0"
 
 [workspace.dependencies]
-mod-api = { git = "https://github.com/cinnabar-mc/cinnabar", rev = "8064f58fba3f2f504a0d5be82dfc32906d7ce49b" }
+mod-api = { git = "https://github.com/cinnabar-mc/cinnabar", rev = "1b11792886a54c48607a8a6e02f850af741c7492" }
 
 [profile.release]
 # Callback fuel is bounded by the host; optimize execution rather than file size.
